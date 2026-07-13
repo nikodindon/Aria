@@ -1,6 +1,7 @@
 """
 core/memory.py — Mémoire persistante (SQLite)
 """
+import re
 import sqlite3
 import json
 from datetime import datetime
@@ -9,6 +10,25 @@ from pathlib import Path
 DB_PATH = Path("data/aria.db")
 
 _initialized = False
+
+
+def redact_credentials(text: str) -> str:
+    """Masque les codes 4-8 chiffres (codes de verif, OTP, PIN).
+
+    Conservateur : ne masque PAS les nombres de 1-3 chiffres, ni les
+    nombres de 9+ chiffres (num de tel, IBAN, etc.). Peut etre un
+    peu over-aggressive sur les annees ("2026" -> masque).
+
+    Format : "[REDACTED]" (avec une mention globale par message
+    contenant au moins un code, en plus du remplacement).
+    """
+    if not text:
+        return text
+    pattern = re.compile(r"(?<!\d)\d{4,8}(?!\d)")
+    masked = pattern.sub("[REDACTED]", text)
+    if masked != text:
+        masked = masked + " [REDACTED]"
+    return masked
 
 
 def get_conn() -> sqlite3.Connection:
@@ -100,10 +120,15 @@ def _init_db_unlocked(conn: sqlite3.Connection):
 
 
 def log_message(platform: str, sender: str, direction: str, content: str):
+    # Securite : on redacte systematiquement les credentials (codes
+    # 4-8 chiffres) AVANT d'ecrire en DB. Sinon un message entrant
+    # contenant un code de verif se retrouve en clair sur disque,
+    # et un recall_relevant peut le retourner tel quel.
+    safe_content = redact_credentials(content)
     conn = get_conn()
     conn.execute(
         "INSERT INTO messages (ts, platform, sender, direction, content) VALUES (?,?,?,?,?)",
-        (datetime.now().isoformat(), platform, sender, direction, content)
+        (datetime.now().isoformat(), platform, sender, direction, safe_content)
     )
     conn.commit()
     conn.close()
