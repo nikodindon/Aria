@@ -306,8 +306,8 @@ which hermes
 hermes chat -q "Salut, dis juste 'ok'"
 # Doit répondre "ok" en 5-10s
 
-# 5. Appairer un user WhatsApp
-python tools/aria_pair.py --phone 33617186267 --name "Niko"
+# 7. Appairer un user WhatsApp (utilise ton propre numero, pas celui de la doc !)
+python tools/aria_pair.py --phone 336XXXXXXXX --name "TON_NOM"
 
 # 6. Lancer le daemon (gateway permanent)
 python tools/aria_daemon.py --interval 5
@@ -341,16 +341,15 @@ ARIA fonctionne comme un bot, mais **en local** (pas de cloud, pas d'API tierce,
 ### Le flow
 
 ```
-Toi (tel perso)         ARIA gateway (PC)              Xiaomi (num dédié)
-+33 6 17 18 62 67                                     +33 7 80 85 81 36
+Toi (tel perso)              ARIA gateway (PC)              Xiaomi (num dedie ARIA)
++33X XX XX XX XX                                        +33Y XX XX XX XX
        │                       │                              │
        │  message WhatsApp     │                              │
        │ ──────────────────────┼─────────────────────────────►│
        │                       │                              │
        │                       │ ◄─ dumpsys notification      │
        │                       │    parse → extract phone     │
-       │                       │    match user Niko           │
-       │                       │    recall FTS5 (long-terme)  │
+       │                       │    match user (ton num)      │
        │                       │    delegate Hermes (actu)    │
        │                       │    send via wa.me deep link  │
        │                       │ ────────────────────────────►│

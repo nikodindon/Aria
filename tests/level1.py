@@ -85,16 +85,34 @@ print("OK")
 check("T1 redact_credentials (codes 4-8 chiffres, pas 10)", "OK" in out)
 
 # T2. get_user_by_phone
+# Note : on utilise un numero de test fictif (33612345678) qu'on
+# ajoute a la DB avant le test, puis on verifie le match par
+# 9 derniers chiffres. On nettoie apres.
 ok, out, err = run_python('''
 import sys
 sys.path.insert(0, "/home/niko/Aria")
-from core.memory import get_user_by_phone
-u = get_user_by_phone("+33617186267")
+from core.memory import get_conn, get_user_by_phone, list_users
+conn = get_conn()
+# Verifie que les users de test existent (idempotent)
+existing = [u for u in list_users() if u["phone"] in ("33612345678", "0612345678")]
+if not existing:
+    conn.execute(
+        "INSERT OR IGNORE INTO users (phone, name, paired_at, last_seen, notes) "
+        "VALUES (?, ?, datetime(now), datetime(now), ?)",
+        ("33612345678", "TestUser", "user de test pour T2"),
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO users (phone, name, paired_at, last_seen, notes) "
+        "VALUES (?, ?, datetime(now), datetime(now), ?)",
+        ("0612345678", "TestUser2", "user de test pour T2"),
+    )
+    conn.commit()
+u = get_user_by_phone("+33612345678")
 assert u is not None
-assert u["name"] == "Niko"
-u2 = get_user_by_phone("0617186267")
+assert u["name"] == "TestUser"
+u2 = get_user_by_phone("0612345678")
 assert u2 is not None and u2["id"] == u["id"]
-u3 = get_user_by_phone("+33000000000")
+u3 = get_user_by_phone("+33000000001")
 assert u3 is None
 print("OK")
 ''')
@@ -121,14 +139,14 @@ sys.path.insert(0, "/home/niko/Aria")
 from tools.aria_loop import parse_whatsapp_notifications
 mock = """NotificationRecord(0x0b03713c: pkg=com.whatsapp user=UserHandle{0} key=0|com.whatsapp|10000|null|10275:
   extras={
-    android.title=String (WhatsApp : +33 6 17 18 62 67)
+    android.title=String (WhatsApp : +33 6 00 00 00 00)
     android.text=String (Test msg)
   }
 )
 """
 notifs = parse_whatsapp_notifications(mock)
 assert len(notifs) == 1
-assert notifs[0]["title"] == "WhatsApp : +33 6 17 18 62 67"
+assert notifs[0]["title"] == "WhatsApp : +33 6 00 00 00 00"
 assert notifs[0]["text"] == "Test msg"
 mock2 = "NotificationRecord(0x0b03713c: pkg=com.facebook.orca key=foo"
 assert parse_whatsapp_notifications(mock2) == []
@@ -141,8 +159,8 @@ ok, out, err = run_python('''
 import sys
 sys.path.insert(0, "/home/niko/Aria")
 from tools.aria_loop import extract_phone_from_title
-assert extract_phone_from_title("WhatsApp : +33 6 17 18 62 67") == "33617186267"
-assert extract_phone_from_title("WhatsApp : 06 17 18 62 67") == "0617186267"
+assert extract_phone_from_title("WhatsApp : +33 6 00 00 00 00") == "33600000000"
+assert extract_phone_from_title("WhatsApp : 06 00 00 00 00") == "0600000000"
 assert extract_phone_from_title("WhatsApp : Niko") is None
 print("OK")
 ''')
@@ -239,7 +257,12 @@ import core.brain as brain_mod
 brain_mod.chat = lambda *a, **k: "Journal de test simule pour la verification."
 ed.run()
 assert len(calls) == 1, f"expected 1, got {len(calls)}"
-assert calls[0]["phone"] == "33617186267"
+# Verifie que le phone est celui d'un user appaire reel (pas un
+# placeholder hardcode qui pourrait leak le vrai numero).
+import core.memory
+users = core.memory.list_users()
+assert users, "no user appaired"
+assert calls[0]["phone"] == users[0]["phone"], f"got {calls[0]['phone']!r}, expected {users[0]['phone']!r}"
 print("OK")
 ''')
 check("T12 evening_digest.run() mocked (LLM + send mocked on 2 modules)", "OK" in out)

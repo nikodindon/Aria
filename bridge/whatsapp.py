@@ -441,8 +441,8 @@ def send_message(text: str, phone: Optional[str] = None,
     Envoie un message WhatsApp.
 
     Deux strategies :
-      1. Si `phone` est fourni (format international, ex '33617186267'
-         ou '+33617186267') : utilise le deep link wa.me/<phone>?text=
+      1. Si `phone` est fourni (format international, ex '336XXXXXXXX'
+         ou '+33X****XXXX') : utilise le deep link wa.me/<phone>?text=
          via `am start -a android.intent.action.VIEW`. C'est la voie
          recommandee : pas de probleme d'autocorrect, pas de gestion
          du clavier, ouvre directement la bonne conversation.

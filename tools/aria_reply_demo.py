@@ -16,7 +16,7 @@ tourner.
 
 Usage :
   python tools/aria_reply_demo.py
-  python tools/aria_reply_demo.py --phone 33617186267
+  python tools/aria_reply_demo.py --phone 336XXXXXXXX
 """
 import sys
 import argparse
@@ -48,8 +48,8 @@ def find_user_conversation(phone_digits: str):
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--phone", default="33617186267",
-                        help="Numero du contact au format international (defaut: 33617186267)")
+    parser.add_argument("--phone", default="",
+                        help="Numero du contact au format international (ex: 336XXXXXXXX)")
     parser.add_argument("--max-tokens", type=int, default=300)
     args = parser.parse_args()
 

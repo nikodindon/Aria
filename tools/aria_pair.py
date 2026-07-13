@@ -2,8 +2,8 @@
 tools/aria_pair.py — Appairage d'un user ARIA (Phase 2 : gateway).
 
 Usage :
-  python tools/aria_pair.py --phone 33617186267 --name "Niko"
-  python tools/aria_pair.py --phone 0617186267 --name "Niko" --notes "createur"
+  python tools/aria_pair.py --phone 336XXXXXXXX --name "TON_NOM"
+  python tools/aria_pair.py --phone 06XXXXXXXX --name "TON_NOM" --notes "createur du projet"
   python tools/aria_pair.py --list
 
 Enregistre le user dans la table `users` de la DB ARIA. Apres

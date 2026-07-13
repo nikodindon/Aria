@@ -80,7 +80,7 @@ def parse_whatsapp_notifications(dump: str) -> list[dict]:
         key_m = _re.search(r"key=([^\s]+)", chunk)
         if not (title_m and key_m):
             continue
-        # Le title est souvent "WhatsApp : +33 6 17 18 62 67" ou
+        # Le title est souvent "WhatsApp : +33X XX XX XX XX" ou
         # "WhatsApp : Nom du contact". On extrait apres "WhatsApp : "
         title = title_m.group(1)
         text = text_m.group(1) if text_m else ""
@@ -96,7 +96,7 @@ def extract_phone_from_title(title: str) -> str | None:
     """Extrait un num de telephone d'un title de notif WhatsApp.
 
     Heuristique : cherche une sequence de chiffres avec espaces
-    type '+33 6 17 18 62 67' ou '+33617186267'. Si pas de num,
+    type '+33X XX XX XX XX' ou '+33X****XXXX'. Si pas de num,
     c'est un nom de contact (auquel cas on matchera par nom).
     """
     # Pattern international avec espaces : +XX X XX XX XX XX
@@ -468,7 +468,7 @@ def main() -> int:
     users = list_users()
     if not users:
         print("Aucun user appaire. Lance d'abord :")
-        print("  python tools/aria_pair.py --phone 33617186267 --name Niko")
+        print(f"  python tools/aria_pair.py --phone 336XXXXXXXX --name TON_NOM")
         return 1
     print(f"=== ARIA loop gateway ===")
     print(f"Users apparies : {[u.get('name') or u['phone'] for u in users]}")
