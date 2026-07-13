@@ -31,6 +31,7 @@ Limitations actuelles :
     on continue.
 """
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -195,6 +196,13 @@ def process_pending_notifications(seen_keys: set) -> int:
     dans des dumps successifs tant qu'elle n'est pas dismissed par
     l'utilisateur. Vu qu'on les diff avec le poll precedent, une
     notif dejà vue n'est consideree nouvelle qu'une seule fois.
+
+    Dedup temporel : en plus de la cle de notif, on dedup aussi sur
+    le contenu texte. Si on a deja repondu a un message tres similaire
+    (meme texte normalise) dans les DEDUP_WINDOW_MINUTES dernieres
+    minutes, on skip. Ca protege contre les cas ou Android reemet
+    la notif avec une cle differente (ex: apres rotation, ou apres
+    que la notif originale a ete dismissed puis re-emise).
     """
     try:
         dump = dump_notifications()
@@ -206,6 +214,9 @@ def process_pending_notifications(seen_keys: set) -> int:
     current_keys = {n["key"] for n in notifs}
     new_keys = current_keys - seen_keys
     seen_keys.update(current_keys)
+
+    # Charge l'historique des messages recemment traites (dedup temporel)
+    recent_texts = _load_recent_texts(window_min=DEDUP_WINDOW_MINUTES)
 
     treated = 0
     for n in notifs:
@@ -219,10 +230,66 @@ def process_pending_notifications(seen_keys: set) -> int:
         if not user:
             print(f"[aria_loop] notif d'un num non appaire: {phone} ({n['title']!r})")
             continue
+        # Dedup temporel : meme contenu dans les dernieres X min ?
+        text_norm = _normalize_for_dedup(n["text"])
+        if text_norm in recent_texts:
+            print(f"[aria_loop] doublon recent detecte (meme texte en <{DEDUP_WINDOW_MINUTES}min), skip: {n['text'][:50]!r}")
+            continue
         print(f"[aria_loop] nouvelle notif de {user.get('name') or phone}: {n['text'][:60]!r}")
         if reply_to_user(user, n["text"]):
             treated += 1
+            # Enregistre le texte pour le dedup futur
+            _record_text_seen(text_norm)
     return treated
+
+
+DEDUP_WINDOW_MINUTES = 10
+SEEN_TEXTS_PATH = Path("data/seen_texts.json")
+
+
+def _normalize_for_dedup(text: str) -> str:
+    """Normalise un texte pour dedup : lowercase, strip, retire ponctuation.
+
+    'Comment tu vas ?' et 'comment tu vas' et 'Comment tu vas?' sont
+    consideres identiques. On garde les accents (le redact_credentials
+    peut etre different entre 2 messages similaires).
+    """
+    import re as _re
+    t = text.lower().strip()
+    # Retire ponctuation a la fin
+    t = _re.sub(r"[\?\.\!\s]+$", "", t)
+    return t
+
+
+def _load_recent_texts(window_min: int = DEDUP_WINDOW_MINUTES) -> set[str]:
+    """Charge les textes normalises vus recemment (moins de window_min)."""
+    if not SEEN_TEXTS_PATH.exists():
+        return set()
+    try:
+        data = json.loads(SEEN_TEXTS_PATH.read_text())
+    except Exception:
+        return set()
+    now = time.time()
+    cutoff = now - window_min * 60
+    return {text for text, ts in data.items() if ts > cutoff}
+
+
+def _record_text_seen(text_norm: str) -> None:
+    """Enregistre un texte normalise comme vu maintenant. Persistant."""
+    SEEN_TEXTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if SEEN_TEXTS_PATH.exists():
+        try:
+            data = json.loads(SEEN_TEXTS_PATH.read_text())
+        except Exception:
+            data = {}
+    else:
+        data = {}
+    # Nettoie les vieux (>DEDUP_WINDOW_MINUTES) avant d'ajouter
+    now = time.time()
+    cutoff = now - DEDUP_WINDOW_MINUTES * 60
+    data = {t: ts for t, ts in data.items() if ts > cutoff}
+    data[text_norm] = now
+    SEEN_TEXTS_PATH.write_text(json.dumps(data))
 
 
 def main() -> int:

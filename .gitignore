@@ -8,6 +8,7 @@ __pycache__/
 # Données locales
 data/aria.db
 data/logs/
+data/seen_texts.json
 *.db
 *.sqlite
 
