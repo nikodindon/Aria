@@ -198,6 +198,14 @@ def reply_to_user(user: dict, last_message: str) -> bool:
             print(f"[aria_loop] LLM a renvoye reponse vide, fallback")
             return False
 
+    # 2.6 Troncature de la reponse. WhatsApp n'a pas de limite stricte
+    # mais un message > 800 chars peut deplacer le bouton Envoyer de
+    # la zone detectee par _find_send_button(), causant un tap rate.
+    # On coupe a 700 chars et on finit par "..." si on a coupe.
+    if len(response) > 700:
+        response = response[:700].rsplit(" ", 1)[0] + "..."
+        print(f"[aria_loop] reponse tronquee a 700 chars")
+
     # 3. Envoi via deep link
     try:
         send_message(response, phone=user["phone"])
