@@ -40,11 +40,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.brain import chat
-from core.context_builder import SYSTEM_PERSONA
+from core.context_builder import build_whatsapp_context
 from core.memory import (
-    get_user_by_phone, list_users, log_message, touch_user, save_mood
+    get_user_by_phone, list_users, log_message, touch_user, save_mood,
+    get_recent_messages,
 )
-from core.personality import format_mood_for_prompt, update_mood
 from bridge import adb
 from bridge.whatsapp import (
     current_view, list_conversations, open_conversation,
@@ -112,24 +112,22 @@ def extract_phone_from_title(title: str) -> str | None:
 
 
 def reply_to_user(user: dict, last_message: str) -> bool:
-    """Genere une reponse via LLM et l'envoie a l'user via deep link."""
-    # 1. Prompt LLM
-    mood = format_mood_for_prompt()
-    system = SYSTEM_PERSONA.format(
-        context=f"Conversation WhatsApp avec {user.get('name') or 'un contact'}. "
-                f"Il vient de t'envoyer un message.",
-        mood_state=mood,
-    )
-    user_msg = (
-        f"{user.get('name') or 'Contact'} vient de t'envoyer ce message WhatsApp :\n\n"
-        f"{last_message}\n\n"
-        "Reponds en 2-3 phrases max, comme une vraie conversation WhatsApp. "
-        "Sois naturelle, pas de formule de politesse chiante. "
-        "Pas de mensonges sur ce que tu fais."
-    )
+    """Genere une reponse via LLM et l'envoie a l'user via deep link.
+
+    Utilise build_whatsapp_context() qui assemble le system prompt
+    (persona + mood) ET injecte les 15 derniers messages de la DB
+    dans le prompt user. C'est la memoire court-terme.
+    """
+    sender = user.get("name") or user["phone"]
+    try:
+        system, messages = build_whatsapp_context(sender, last_message)
+    except Exception as e:
+        print(f"[aria_loop] build_context failed: {e}")
+        return False
+
     try:
         response = chat(
-            messages=[{"role": "user", "content": user_msg}],
+            messages=messages,
             system=system,
             max_tokens=300,
         )
@@ -144,11 +142,44 @@ def reply_to_user(user: dict, last_message: str) -> bool:
         print(f"[aria_loop] send failed: {e}")
         return False
 
-    # 3. Log
+    # 3. Log en DB (in + out)
+    log_message("whatsapp", sender, "in", last_message)
     log_message("whatsapp", "ARIA", "out", response)
-    log_message("whatsapp", user.get("name", user["phone"]), "in", last_message)
     touch_user(user["id"])
+
+    # 4. Mood update : derive le mood de la longueur et du ton de
+    # l'echange. KISS : on prend la longueur de la reponse comme
+    # proxy d'engagement, et on incremente curiosity si l'incoming
+    # contenait un point d'interrogation.
+    update_mood_from_interaction(last_message, response)
+
     return True
+
+
+def update_mood_from_interaction(incoming: str, outgoing: str):
+    """Ajuste le mood d'ARIA en fonction de l'interaction.
+
+    Heuristique KISS :
+    - Si l'incoming contient '?' => curiosity monte
+    - Si outgoing > 200 chars => engagement haut
+    - Sinon mood neutre
+    """
+    from core.memory import get_current_mood
+    current = get_current_mood()
+    curiosity = current.get("curiosity", "normale")
+    energy = current.get("energy", "normale")
+    if "?" in incoming:
+        curiosity = "élevée"
+    if len(outgoing) > 200:
+        energy = "haute"
+    elif len(outgoing) < 50:
+        energy = "basse"
+    save_mood(
+        mood=current.get("mood", "neutre"),
+        energy=energy,
+        curiosity=curiosity,
+        reason=f"interaction ({len(incoming)}c in, {len(outgoing)}c out)",
+    )
 
 
 def process_pending_notifications(seen_keys: set) -> int:
