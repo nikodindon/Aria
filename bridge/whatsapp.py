@@ -120,6 +120,132 @@ def _ocr_rows(crop: Image.Image) -> list[dict]:
     return rows
 
 
+# --- read_conversation -----------------------------------------------------
+
+# Regex conservative pour redacter les codes/credentials typiques
+# (codes de verif, OTP, PINs). On remplace un run de 4-8 chiffres
+# isoles par [REDACTED]. Les numeros plus courts ou plus longs passent.
+_CREDENTIAL_RE = re.compile(r"(?<!\d)\d{4,8}(?!\d)")
+
+
+def redact_credentials(text: str) -> str:
+    """Masque les credentials typiques dans un texte.
+
+    Politique conservative : on remplace un run de 4-8 chiffres (pas
+    dans un nombre plus long, ex. pas dans 12345678901) par
+    [REDACTED]. Si on a redacted quelque chose, on ajoute un marqueur
+    "[REDACTED]" en fin pour que le caller sache que la valeur est
+    masquee et qu'il ne doit pas la prendre pour la valeur reelle.
+    """
+    redacted = _CREDENTIAL_RE.sub("[REDACTED]", text)
+    if redacted != text:
+        return redacted + " [REDACTED]"
+    return redacted
+
+
+def read_conversation(screenshot_path: Optional[str] = None) -> list[dict]:
+    """
+    Lit les messages visibles dans une conversation WhatsApp ouverte.
+
+    Heuristique Phase 1.3 :
+      - Crop la zone messages (y=[280, 2150] sur 1080x2400).
+      - OCR mot par mot avec image_to_data.
+      - Groupement en messages : un nouveau message demarre quand
+        le gap vertical entre deux mots consecutifs depasse 1.5x la
+        hauteur moyenne d'un mot.
+      - Direction : position du bord gauche. < 270 =recu (gauche),
+        > 810 =envoye (droite), sinon unknown.
+      - Timestamp : dernier mot du message, si format HH:MM.
+      - Credentials redactes via redact_credentials().
+
+    Note : suppose qu'on est DANS une conversation ouverte. Si on
+    est sur la vue Discussions, l'OCR produit du garbage. Le caller
+    doit verifier current_view() == "conversation" en amont.
+    """
+    png = Path(screenshot_path) if screenshot_path else _screenshot()
+    img = Image.open(png)
+    w, h = img.size
+    if (w, h) != (DEFAULT_W, DEFAULT_H):
+        img = img.resize((DEFAULT_W, DEFAULT_H))
+
+    MSG_TOP = 280
+    MSG_BOTTOM = 2150
+    crop = img.crop((0, MSG_TOP, DEFAULT_W, MSG_BOTTOM))
+
+    data = pytesseract.image_to_data(
+        crop, lang="fra", output_type=pytesseract.Output.DICT
+    )
+    n = len(data["text"])
+    words = []
+    for i in range(n):
+        txt = data["text"][i].strip()
+        try:
+            conf = float(data["conf"][i])
+        except (ValueError, TypeError):
+            conf = -1
+        if not txt or conf < 30:
+            continue
+        words.append({
+            "text": txt,
+            "top": data["top"][i],
+            "left": data["left"][i],
+            "height": data["height"][i],
+        })
+    if not words:
+        return []
+
+    avg_h = sum(w["height"] for w in words) / len(words)
+    gap_threshold = int(avg_h * 1.5)
+    words.sort(key=lambda w: (w["top"], w["left"]))
+
+    # Groupement en messages : on coupe quand le gap vertical entre
+    # le mot precedent et le mot courant depasse le seuil.
+    messages: list[list[dict]] = []
+    current: list[dict] = [words[0]]
+    for w in words[1:]:
+        prev = current[-1]
+        vertical_gap = w["top"] - (prev["top"] + prev["height"])
+        if vertical_gap > gap_threshold:
+            messages.append(current)
+            current = [w]
+        else:
+            current.append(w)
+    messages.append(current)
+
+    result = []
+    for msg_words in messages:
+        msg_words_sorted = sorted(msg_words, key=lambda w: (w["top"], w["left"]))
+        text = " ".join(w["text"] for w in msg_words_sorted)
+
+        min_left = min(w["left"] for w in msg_words_sorted)
+        if min_left < 270:
+            direction = "in"
+        elif min_left > 810:
+            direction = "out"
+        else:
+            direction = "unknown"
+
+        time_str = ""
+        if msg_words_sorted:
+            last = msg_words_sorted[-1]["text"]
+            if re.match(r"^\d{1,2}:\d{2}$", last):
+                time_str = last
+
+        y_center = msg_words_sorted[0]["top"] + msg_words_sorted[0]["height"] // 2 + MSG_TOP
+
+        if time_str:
+            text = text[: -len(time_str)].strip()
+
+        result.append({
+            "direction": direction,
+            "text": redact_credentials(text),
+            "time": time_str,
+            "y_center": y_center,
+        })
+
+    return result
+
+
 def list_conversations(screenshot_path: Optional[str] = None) -> list[dict]:
     """
     Lit la vue Discussions de WhatsApp et retourne la liste des conversations.
@@ -235,9 +361,16 @@ def current_view() -> str:
     if "demander à meta" in text or ("discussions" in text and "actus" in text):
         return "discussions"
     # Placeholder champ de saisie. Variantes : "message", "saisir un message",
-    # "taper un message". On cherche "message" en mot isole (suivi d'espace
-    # ou en fin de ligne) pour eviter les faux positifs (sinon "messages
-    # personnels sont chiffres" matche aussi).
-    if re.search(r"\bmessage\b", text) and "personnels" not in text:
+    # "taper un message". On cherche le SINGULIER "message" en mot isole
+    # (suivi d'espace ou en fin de ligne) pour eviter les faux positifs
+    # ("messages personnels sont chiffres" et "gerer les messages" du
+    # card de bienvenue business).
+    if re.search(r"\bmessage\b", text) and "personnels" not in text and "gérer" not in text:
+        return "conversation"
+    # Fallback : indices d'une conversation ouverte. La card de bienvenue
+    # business contient "compte professionnel" + "membre depuis", et
+    # les messages bulles contiennent "code de vérification" (typique
+    # des messages de service). On accepte l'un OU l'autre comme preuve.
+    if "compte professionnel" in text or "code de vérification" in text:
         return "conversation"
     return "other"
