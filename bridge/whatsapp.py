@@ -527,6 +527,20 @@ def _send_via_deeplink(phone: str, text: str) -> bool:
     cx, cy = _find_send_button(str(png))
     adb.tap(cx, cy)
     time.sleep(1.0)
+
+    # 4. Endors le telephone. Sinon, apres l'envoi, WhatsApp reste
+    # au premier plan, et la prochaine notif ne sera pas poussee
+    # (Android ne notifie pas une app deja au premier plan). Si
+    # l'ecran est eteint, WhatsApp passe en arriere-plan et la
+    # prochaine notif sera visible. KEYCODE_SLEEP (= 26) eteint
+    # l'ecran immediatement.
+    try:
+        adb._adb("shell", "input", "keyevent", "26", check=True)
+        time.sleep(0.3)
+    except Exception as e:
+        # Pas grave si on arrive pas a dormir le tel, l'envoi a deja
+        # fonctionne.
+        print(f"[send_message] sleep failed (non-bloquant): {e}")
     return True
 
 
