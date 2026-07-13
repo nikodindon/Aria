@@ -259,8 +259,16 @@ def list_conversations(screenshot_path: Optional[str] = None) -> list[dict]:
     1 à 2 lignes OCR. Si l'aperçu contient [N], on le retire du
     texte et on l'expose comme badge.
 
-    Retourne une liste vide si la vue ne ressemble pas à Discussions.
+    Retourne une liste vide si la vue ne ressemble pas a Discussions
+    (guard) ou si l'OCR ne detecte rien.
     """
+    # Guard : si on n'est pas sur la vue Discussions, l'OCR produit
+    # du garbage (les messages d'une conversation ouverte sont parses
+    # comme des "conversations" par accident). On refuse de tourner
+    # plutot que de retourner du faux data.
+    if screenshot_path is None and current_view() != "discussions":
+        return []
+
     png = Path(screenshot_path) if screenshot_path else _screenshot()
     img = Image.open(png)
     crop = _crop_list(img)
@@ -372,44 +380,75 @@ def _find_send_button(png_path: str) -> tuple[int, int]:
     return 990, 1430
 
 
-def send_message(text: str, screenshot_path: Optional[str] = None) -> bool:
+def send_message(text: str, phone: Optional[str] = None,
+                 screenshot_path: Optional[str] = None) -> bool:
     """
-    Envoie un message dans la conversation WhatsApp actuellement ouverte.
+    Envoie un message WhatsApp.
 
-    Sequence :
-      1. Tap sur le champ de saisie.
-      2. Envoie le texte via send_text() (adb input text).
-      3. Detecte le bouton Envoyer par couleur (cercle vert) et tap.
-         On accepte le bouton avec ou sans clavier visible (le
-         _find_send_button cherche dans une large zone).
+    Deux strategies :
+      1. Si `phone` est fourni (format international, ex '33617186267'
+         ou '+33617186267') : utilise le deep link wa.me/<phone>?text=
+         via `am start -a android.intent.action.VIEW`. C'est la voie
+         recommandee : pas de probleme d'autocorrect, pas de gestion
+         du clavier, ouvre directement la bonne conversation.
+      2. Sinon : suppose qu'on est DEJA dans une conversation ouverte
+         (current_view() == 'conversation'). Tap sur le champ de
+         saisie, send_text, tap sur le bouton Envoyer (detecte par
+         couleur). Plus fragile mais utile quand on n'a pas le num.
 
-    Note : on n'utilise PAS press_back() pour fermer le clavier — sur
-    MIUI/Xiaomi, back quitte la conversation au lieu de fermer le
-    clavier. C'est un piege connu. Si le clavier est visible apres
-    le tap, le _find_send_button cherche quand meme le bouton dans
-    la zone haute (y=1400-1500) et le trouve.
+    Note : adb input text (utilise par la strategie 2) ne supporte
+    pas les accents. Le deep link (strategie 1) passe par
+    urllib.parse.quote() qui preserve les accents.
 
-    Le caller doit s'assurer qu'on est DANS une conversation ouverte
-    (current_view() == "conversation"). Sinon les taps ratent.
+    Le caller doit s'assurer qu'on est dans une conversation ouverte
+    (strategie 2) ou que le num est valide (strategie 1).
 
-    Retourne True si la sequence s'est executee sans exception. On
-    ne verifie pas l'effet de bord ici (le caller peut utiliser
-    read_conversation() pour confirmer que le message est bien
-    apparu dans la conversation).
+    Retourne True si la sequence s'est executee sans exception.
+    """
+    if phone:
+        return _send_via_deeplink(phone, text)
+    return _send_in_conversation(text, screenshot_path)
 
-    Note : adb input text ne supporte pas les accents. Le caller
-    doit preparer un texte ASCII ou accepter que les accents soient
-    detruits. Les espaces sont remplaces par %s par send_text().
+
+def _send_via_deeplink(phone: str, text: str) -> bool:
+    """Envoie un message via le deep link WhatsApp wa.me/<phone>?text="""
+    import urllib.parse
+    # Normalise le num : wa.me attend le format international sans +
+    digits = "".join(c for c in phone if c.isdigit())
+    encoded = urllib.parse.quote(text, safe="")
+    url = f"https://wa.me/{digits}?text={encoded}"
+    print(f"[send_message] deep link: {url[:80]}...")
+    # am start -a android.intent.action.VIEW -d <url>
+    adb._adb(
+        "shell", "am", "start",
+        "-a", "android.intent.action.VIEW",
+        "-d", url,
+        check=True,
+    )
+    time.sleep(2.0)  # laisser WhatsApp ouvrir la conv et charger le texte
+    # Trouve et tap le bouton Envoyer (le deep link pre-remplit mais
+    # ne tape pas Envoyer tout seul)
+    png = _screenshot()
+    cx, cy = _find_send_button(str(png))
+    adb.tap(cx, cy)
+    time.sleep(1.0)
+    return True
+
+
+def _send_in_conversation(text: str, screenshot_path: Optional[str] = None) -> bool:
+    """Envoie un message dans la conversation WhatsApp deja ouverte.
+
+    Strategie tap-based. Moins robuste que le deep link (autocorrect
+    AZERTY, gestion du clavier), mais utile quand on n'a pas le num
+    du contact sous la main.
     """
     # 1. Focus le champ de saisie (y=1100 couvre le champ avec ou
     #    sans clavier visible)
     adb.tap(455, 1100)
     time.sleep(0.3)
-
     # 2. Envoie le texte
     adb.send_text(text)
     time.sleep(0.5)
-
     # 3. Trouve et tap le bouton Envoyer (avec ou sans clavier visible)
     png = Path(screenshot_path) if screenshot_path else _screenshot()
     cx, cy = _find_send_button(str(png))
