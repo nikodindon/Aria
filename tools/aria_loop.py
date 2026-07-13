@@ -146,8 +146,26 @@ def reply_to_user(user: dict, last_message: str) -> bool:
                 max_tokens=300,
             )
         except Exception as e:
-            print(f"[aria_loop] LLM failed: {e}")
-            return False
+            print(f"[aria_loop] LLM failed (1st try): {e}")
+            # Retry avec backoff exponentiel sur 429 (rate limit) ou
+            # erreurs transitoires. On tente 3 fois max : 2s, 4s, 8s.
+            import time as _time
+            for attempt, delay in enumerate([2, 4, 8], start=2):
+                _time.sleep(delay)
+                try:
+                    response = chat(
+                        messages=messages,
+                        system=system,
+                        max_tokens=300,
+                    )
+                    print(f"[aria_loop] LLM OK au {attempt}e retry")
+                    break
+                except Exception as e2:
+                    print(f"[aria_loop] LLM failed (retry {attempt}): {e2}")
+            else:
+                # Tous les retries ont foire
+                print(f"[aria_loop] LLM failed apres 4 tentatives, skip")
+                return False
 
     # 3. Envoi via deep link
     try:

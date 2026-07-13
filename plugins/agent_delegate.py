@@ -137,11 +137,16 @@ DELEGATION_KEYWORDS = [
     r"\bcherche\b", r"\btrouve\b", r"\bsearch\b", r"\bfind\b",
     r"\bc'est quoi\b", r"\bwhat is\b", r"\bqui est\b", r"\bwho is\b",
     r"\bdéfinition\b", r"\bdefinition\b",
-    # Actualite
+    # Actualite / temporalite (mots qui suggerent info recente)
     r"\bactu\b", r"\bactu(?:alité)?s?\b", r"\bnews\b",
     r"\bdernières?\s+nouvelles?\b", r"\blast\b",
     r"\bmaintenant\b", r"\bnow\b", r"\b2026\b", r"\b2027\b",
     r"\baujourd'hui\b", r"\btoday\b", r"\bcette semaine\b", r"\bthis week\b",
+    r"\brécemment\b", r"\brécent\b", r"\bdernièrement\b", r"\brecently\b",
+    r"\bactuellement\b", r"\bcurrently\b",
+    # Retour / come back (souvent question d'actu)
+    r"\best\s+revenu\b", r"\best\s+de\s+retour\b", r"\bcome\s+back\b",
+    r"\bcomeback\b", r"\best\s+arrivé\b", r"\bhappened\b",
     # Meteo / lieu specifique
     r"\bmétéo\b", r"\bweather\b", r"\btempérature\b", r"\btemperature\b",
     # Prix / finance
