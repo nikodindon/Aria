@@ -287,11 +287,17 @@ def process_pending_notifications(seen_keys: set) -> int:
         if text_norm in recent_texts:
             print(f"[aria_loop] doublon recent detecte (meme texte en <{DEDUP_WINDOW_MINUTES}min), skip: {n['text'][:50]!r}")
             continue
+        # IMPORTANT : on enregistre le texte vu AVANT de traiter, pour
+        # qu'un 2e poll rapide (Android re-pousse la notif) soit
+        # dedupe meme si le 1er traitement est encore en cours.
+        _record_text_seen(text_norm)
         print(f"[aria_loop] nouvelle notif de {user.get('name') or phone}: {n['text'][:60]!r}")
         if reply_to_user(user, n["text"]):
             treated += 1
-            # Enregistre le texte pour le dedup futur
-            _record_text_seen(text_norm)
+        else:
+            # Si le reply a foire, on retire le dedup (sinon l'user
+            # peut pas renvoyer un message similaire plus tard)
+            _remove_text_seen(text_norm)
     return treated
 
 
@@ -376,6 +382,23 @@ def _record_text_seen(text_norm: str) -> None:
     data = {t: ts for t, ts in data.items() if ts > cutoff}
     data[text_norm] = now
     SEEN_TEXTS_PATH.write_text(json.dumps(data))
+
+
+def _remove_text_seen(text_norm: str) -> None:
+    """Retire un texte du dedup (utilise quand le reply a foire).
+
+    Sans ca, si l'envoi a plante, l'user ne pourrait pas renvoyer
+    un message similaire pendant 10 minutes (fenetre de dedup).
+    """
+    if not SEEN_TEXTS_PATH.exists():
+        return
+    try:
+        data = json.loads(SEEN_TEXTS_PATH.read_text())
+    except Exception:
+        return
+    if text_norm in data:
+        del data[text_norm]
+        SEEN_TEXTS_PATH.write_text(json.dumps(data))
 
 
 def main() -> int:
