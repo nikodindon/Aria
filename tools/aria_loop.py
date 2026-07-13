@@ -143,11 +143,19 @@ def reply_to_user(user: dict, last_message: str) -> bool:
             max_tokens=300,
         )
     except Exception as e:
-        print(f"[aria_loop] LLM failed (1st try): {e}")
-        # Retry avec backoff exponentiel sur 429 (rate limit).
-        # 3 tentatives : 5s, 10s, 20s (long mais robuste).
+        err_str = str(e)
+        is_rate_limit = "429" in err_str or "Too Many" in err_str or "rate" in err_str.lower()
+        print(f"[aria_loop] LLM failed (1st try): {'rate limit' if is_rate_limit else 'erreur'}")
+        # Retry avec backoff exponentiel.
+        # Si c'est un rate limit (429) : on attend plus longtemps,
+        # pour laisser les cles API LiteLLM se liberer (rotation).
+        # Si c'est une autre erreur : on retry quand meme mais plus court.
+        if is_rate_limit:
+            delays = [10, 20, 40, 60]  # 130s total max, pour rate limit
+        else:
+            delays = [3, 6, 12]  # 21s total max, pour autres erreurs
         import time as _time
-        for attempt, delay in enumerate([5, 10, 20], start=2):
+        for attempt, delay in enumerate(delays, start=2):
             _time.sleep(delay)
             try:
                 response = chat(
@@ -158,10 +166,19 @@ def reply_to_user(user: dict, last_message: str) -> bool:
                 print(f"[aria_loop] LLM OK au {attempt}e retry")
                 break
             except Exception as e2:
-                print(f"[aria_loop] LLM failed (retry {attempt}): {e2}")
+                err2_str = str(e2)
+                still_rate = "429" in err2_str or "Too Many" in err2_str
+                print(f"[aria_loop] LLM failed (retry {attempt}): {'rate limit' if still_rate else 'erreur'}")
         else:
-            print(f"[aria_loop] LLM failed apres 4 tentatives, skip")
-            return False
+            print(f"[aria_loop] LLM failed apres {len(delays)+1} tentatives, fallback gracieux")
+            # Au lieu de se taire, on envoie un message d'erreur amical
+            # L'user sait qu'il y a un probleme, il peut retry dans qq min
+            response = "Desole, le LLM rame en ce moment (rate limit). Redemande dans 2-3 minutes ?"
+            # NOTE: si la delegation marche, on l'utilisera aussi
+            from plugins.agent_delegate import ask_helper_agent
+            delegated = ask_helper_agent(f"Reponds a cette question: {last_message}")
+            if delegated and not delegated.startswith("["):
+                response = delegated
 
     # 2. Detection [DELEGATE] dans la reponse du LLM.
     # Le system prompt demande a ARIA de commencer par [DELEGATE] <query>
