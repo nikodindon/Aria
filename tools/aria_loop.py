@@ -234,12 +234,21 @@ def process_pending_notifications(seen_keys: set) -> int:
             continue
         phone = extract_phone_from_title(n["title"])
         if not phone:
-            print(f"[aria_loop] notif sans num detecte: {n['title']!r}")
-            continue
-        user = get_user_by_phone(phone)
-        if not user:
-            print(f"[aria_loop] notif d'un num non appaire: {phone} ({n['title']!r})")
-            continue
+            # Le title ne contient pas de num (juste un nom de contact).
+            # On essaie de matcher par nom sur la table users.
+            user_by_name = _find_user_by_name(n["title"])
+            if user_by_name:
+                user = user_by_name
+                phone = user["phone"]
+                print(f"[aria_loop] notif matchee par nom: {n['title']!r} -> user {user.get('name') or phone}")
+            else:
+                print(f"[aria_loop] notif sans num ni nom connu: {n['title']!r}")
+                continue
+        else:
+            user = get_user_by_phone(phone)
+            if not user:
+                print(f"[aria_loop] notif d'un num non appaire: {phone} ({n['title']!r})")
+                continue
         # Dedup temporel : meme contenu dans les dernieres X min ?
         text_norm = _normalize_for_dedup(n["text"])
         if text_norm in recent_texts:
@@ -251,6 +260,40 @@ def process_pending_notifications(seen_keys: set) -> int:
             # Enregistre le texte pour le dedup futur
             _record_text_seen(text_norm)
     return treated
+
+
+def _find_user_by_name(title: str) -> dict | None:
+    """Trouve un user par nom dans le title de la notif.
+
+    Le title peut etre "WhatsApp : Niko" ou "WhatsApp : Maman"
+    ou meme "Niko" (sans le prefixe). On essaie de matcher
+    case-insensitive sur la table users.
+    """
+    from core.memory import get_conn
+    # Nettoie le title
+    clean = title.strip()
+    if clean.startswith("WhatsApp :"):
+        clean = clean[len("WhatsApp :"):].strip()
+    if not clean:
+        return None
+    conn = get_conn()
+    # Match exact case-insensitive
+    row = conn.execute(
+        "SELECT * FROM users WHERE LOWER(name) = LOWER(?)",
+        (clean,),
+    ).fetchone()
+    if row:
+        conn.close()
+        return dict(row)
+    # Match partiel (le title peut contenir d'autres mots)
+    row = conn.execute(
+        "SELECT * FROM users WHERE LOWER(name) LIKE LOWER(?)",
+        (f"%{clean}%",),
+    ).fetchone()
+    conn.close()
+    if row:
+        return dict(row)
+    return None
 
 
 DEDUP_WINDOW_MINUTES = 10
