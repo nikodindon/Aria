@@ -4,6 +4,7 @@ core/context_builder.py — Assemble le contexte avant chaque appel LLM
 from pathlib import Path
 from core.memory import get_recent_messages, recall_relevant
 from core.personality import format_mood_for_prompt
+from plugins import rss_watcher, weather
 
 SYSTEM_PERSONA = Path("prompts/system_persona.txt").read_text()
 
@@ -15,7 +16,8 @@ def build_whatsapp_context(sender: str, message: str) -> tuple[str, list[dict]]:
     - system : persona ARIA + mood courant
     - user : prompt de reponse avec l'historique recent (15 derniers
       messages) ET les messages les plus pertinents de l'historique
-      long-terme (recherche FTS5 sur le message entrant, top 3).
+      long-terme (recherche FTS5 sur le message entrant, top 3)
+      ET 5 dernieres news ET la meteo actuelle (si dispo).
     """
     # Memoire court-terme : 15 derniers messages
     recent = get_recent_messages(platform="whatsapp", limit=15)
@@ -41,6 +43,12 @@ def build_whatsapp_context(sender: str, message: str) -> tuple[str, list[dict]]:
         else "(rien de pertinent dans l'historique long-terme)"
     )
 
+    # Phase 6 : news (5 dernieres stockees en DB)
+    news_str = rss_watcher.news_summary_for_prompt(limit=5)
+
+    # Phase 6 : meteo actuelle
+    weather_str = weather.weather_for_prompt("Paris")
+
     mood_str = format_mood_for_prompt()
     system = SYSTEM_PERSONA.format(
         context=f"Tu es en train de répondre à {sender} via WhatsApp.",
@@ -52,6 +60,8 @@ def build_whatsapp_context(sender: str, message: str) -> tuple[str, list[dict]]:
         message=message,
         history=history_str,
         relevant=relevant_str,
+        news=news_str,
+        weather=weather_str,
     )
 
     return system, [{"role": "user", "content": reply_prompt}]
