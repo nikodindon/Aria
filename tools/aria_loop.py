@@ -119,20 +119,27 @@ def reply_to_user(user: dict, last_message: str) -> bool:
     1. Detecte si le message necessite une recherche web (keywords)
     2. Si oui, delegue a un agent helper (hermes) qui fait la recherche
     3. Sinon, utilise le LLM local (M2.7-7b) avec le contexte complet
+       + retry avec backoff
+    4. Si LLM echoue apres retries ET message avait l'air d'etre
+       une question d'actu, fallback sur delegation Hermes
 
-    Dans les 2 cas, on log en DB (in + out) et on update le mood.
+    Dans tous les cas, on log en DB (in + out) et on update le mood.
     """
+    from plugins.agent_delegate import delegate_for_message
     sender = user.get("name") or user["phone"]
     response = None
 
     # 1. Detection de besoin de delegation
-    from plugins.agent_delegate import delegate_for_message
-    delegated = delegate_for_message(last_message)
-    if delegated is not None:
+    needs_deleg = needs_delegation(last_message)
+    delegated = None
+    if needs_deleg:
         print(f"[aria_loop] delegation a un agent helper (keywords trouves)")
-        response = delegated
-    else:
-        # 2. Sinon, LLM local avec contexte complet
+        delegated = delegate_for_message(last_message)
+        if delegated is not None:
+            response = delegated
+
+    # 2. Si pas de delegation, LLM local avec contexte complet + retry
+    if response is None:
         try:
             system, messages = build_whatsapp_context(sender, last_message)
         except Exception as e:
@@ -147,10 +154,10 @@ def reply_to_user(user: dict, last_message: str) -> bool:
             )
         except Exception as e:
             print(f"[aria_loop] LLM failed (1st try): {e}")
-            # Retry avec backoff exponentiel sur 429 (rate limit) ou
-            # erreurs transitoires. On tente 3 fois max : 2s, 4s, 8s.
+            # Retry avec backoff exponentiel sur 429 (rate limit).
+            # 3 tentatives : 5s, 10s, 20s (long mais robuste).
             import time as _time
-            for attempt, delay in enumerate([2, 4, 8], start=2):
+            for attempt, delay in enumerate([5, 10, 20], start=2):
                 _time.sleep(delay)
                 try:
                     response = chat(
@@ -163,23 +170,29 @@ def reply_to_user(user: dict, last_message: str) -> bool:
                 except Exception as e2:
                     print(f"[aria_loop] LLM failed (retry {attempt}): {e2}")
             else:
-                # Tous les retries ont foire
-                print(f"[aria_loop] LLM failed apres 4 tentatives, skip")
-                return False
+                # 3. Fallback : si le LLM a totalement foire et que
+                # le message avait l'air d'etre une question d'actu,
+                # on delegue a Hermes en dernier recours.
+                if needs_deleg:
+                    print(f"[aria_loop] fallback delegation Hermes (LLM down)")
+                    response = delegate_for_message(last_message)
+                if response is None:
+                    print(f"[aria_loop] LLM failed apres 4 tentatives, skip")
+                    return False
 
-    # 3. Envoi via deep link
+    # 4. Envoi via deep link
     try:
         send_message(response, phone=user["phone"])
     except Exception as e:
         print(f"[aria_loop] send failed: {e}")
         return False
 
-    # 4. Log en DB (in + out)
+    # 5. Log en DB (in + out)
     log_message("whatsapp", sender, "in", last_message)
     log_message("whatsapp", "ARIA", "out", response)
     touch_user(user["id"])
 
-    # 5. Mood update
+    # 6. Mood update
     update_mood_from_interaction(last_message, response)
 
     return True
