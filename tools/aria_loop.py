@@ -115,43 +115,53 @@ def extract_phone_from_title(title: str) -> str | None:
 def reply_to_user(user: dict, last_message: str) -> bool:
     """Genere une reponse via LLM et l'envoie a l'user via deep link.
 
-    Utilise build_whatsapp_context() qui assemble le system prompt
-    (persona + mood) ET injecte les 15 derniers messages de la DB
-    dans le prompt user. C'est la memoire court-terme.
+    Strategie :
+    1. Detecte si le message necessite une recherche web (keywords)
+    2. Si oui, delegue a un agent helper (hermes) qui fait la recherche
+    3. Sinon, utilise le LLM local (M2.7-7b) avec le contexte complet
+
+    Dans les 2 cas, on log en DB (in + out) et on update le mood.
     """
     sender = user.get("name") or user["phone"]
-    try:
-        system, messages = build_whatsapp_context(sender, last_message)
-    except Exception as e:
-        print(f"[aria_loop] build_context failed: {e}")
-        return False
+    response = None
 
-    try:
-        response = chat(
-            messages=messages,
-            system=system,
-            max_tokens=300,
-        )
-    except Exception as e:
-        print(f"[aria_loop] LLM failed: {e}")
-        return False
+    # 1. Detection de besoin de delegation
+    from plugins.agent_delegate import delegate_for_message
+    delegated = delegate_for_message(last_message)
+    if delegated is not None:
+        print(f"[aria_loop] delegation a un agent helper (keywords trouves)")
+        response = delegated
+    else:
+        # 2. Sinon, LLM local avec contexte complet
+        try:
+            system, messages = build_whatsapp_context(sender, last_message)
+        except Exception as e:
+            print(f"[aria_loop] build_context failed: {e}")
+            return False
 
-    # 2. Envoi via deep link
+        try:
+            response = chat(
+                messages=messages,
+                system=system,
+                max_tokens=300,
+            )
+        except Exception as e:
+            print(f"[aria_loop] LLM failed: {e}")
+            return False
+
+    # 3. Envoi via deep link
     try:
         send_message(response, phone=user["phone"])
     except Exception as e:
         print(f"[aria_loop] send failed: {e}")
         return False
 
-    # 3. Log en DB (in + out)
+    # 4. Log en DB (in + out)
     log_message("whatsapp", sender, "in", last_message)
     log_message("whatsapp", "ARIA", "out", response)
     touch_user(user["id"])
 
-    # 4. Mood update : derive le mood de la longueur et du ton de
-    # l'echange. KISS : on prend la longueur de la reponse comme
-    # proxy d'engagement, et on incremente curiosity si l'incoming
-    # contenait un point d'interrogation.
+    # 5. Mood update
     update_mood_from_interaction(last_message, response)
 
     return True
