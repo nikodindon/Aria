@@ -339,6 +339,85 @@ def open_conversation(name: str, screenshot_path: Optional[str] = None) -> bool:
     return False
 
 
+def _find_send_button(png_path: str) -> tuple[int, int]:
+    """Trouve le bouton Envoyer (cercle vert) dans le screenshot.
+
+    Strategie : cherche un patch dense de pixels verts dans la zone
+    tres restreinte du bouton (y=[2150, 2280], x=[950, 1050]). Le
+    bouton Envoyer WhatsApp est un cercle vert (#00A884 approx).
+    On est strict sur la couleur ET la zone pour eviter les faux
+    positifs (fond de conversation, bulle verte d'un message envoye,
+    theme vert de l'app).
+
+    Retourne (x, y) du centre du patch le plus dense, ou un fallback
+    (990, 2210) si rien n'est detecte.
+    """
+    import numpy as np
+    img = Image.open(png_path)
+    if img.size != (DEFAULT_W, DEFAULT_H):
+        img = img.resize((DEFAULT_W, DEFAULT_H))
+    arr = np.array(img)
+    # Zone large : couvre le bouton Envoyer dans les deux positions
+    # possibles — y=[1380, 2280] — avec et sans clavier visible.
+    # Le bouton est dans le coin droit, x=[950, 1050].
+    bottom = arr[1380:2280, 950:1050]
+    # Couleur stricte : vert WhatsApp (#00A884 = R=0, G=168, B=132)
+    # Tolerance de +/- 30 sur chaque canal.
+    r, g, b = bottom[:, :, 0], bottom[:, :, 1], bottom[:, :, 2]
+    green_mask = (r < 50) & (g > 130) & (g < 220) & (b > 90) & (b < 180) & (g > r + 50)
+    if green_mask.sum() > 200:
+        ys, xs = np.where(green_mask)
+        return int(xs.mean()) + 950, int(ys.mean()) + 1380
+    # Fallback : on tape au milieu de la zone, le caller esperera
+    return 990, 1430
+
+
+def send_message(text: str, screenshot_path: Optional[str] = None) -> bool:
+    """
+    Envoie un message dans la conversation WhatsApp actuellement ouverte.
+
+    Sequence :
+      1. Tap sur le champ de saisie.
+      2. Envoie le texte via send_text() (adb input text).
+      3. Detecte le bouton Envoyer par couleur (cercle vert) et tap.
+         On accepte le bouton avec ou sans clavier visible (le
+         _find_send_button cherche dans une large zone).
+
+    Note : on n'utilise PAS press_back() pour fermer le clavier — sur
+    MIUI/Xiaomi, back quitte la conversation au lieu de fermer le
+    clavier. C'est un piege connu. Si le clavier est visible apres
+    le tap, le _find_send_button cherche quand meme le bouton dans
+    la zone haute (y=1400-1500) et le trouve.
+
+    Le caller doit s'assurer qu'on est DANS une conversation ouverte
+    (current_view() == "conversation"). Sinon les taps ratent.
+
+    Retourne True si la sequence s'est executee sans exception. On
+    ne verifie pas l'effet de bord ici (le caller peut utiliser
+    read_conversation() pour confirmer que le message est bien
+    apparu dans la conversation).
+
+    Note : adb input text ne supporte pas les accents. Le caller
+    doit preparer un texte ASCII ou accepter que les accents soient
+    detruits. Les espaces sont remplaces par %s par send_text().
+    """
+    # 1. Focus le champ de saisie (y=1100 couvre le champ avec ou
+    #    sans clavier visible)
+    adb.tap(455, 1100)
+    time.sleep(0.3)
+
+    # 2. Envoie le texte
+    adb.send_text(text)
+    time.sleep(0.5)
+
+    # 3. Trouve et tap le bouton Envoyer (avec ou sans clavier visible)
+    png = Path(screenshot_path) if screenshot_path else _screenshot()
+    cx, cy = _find_send_button(str(png))
+    adb.tap(cx, cy)
+    time.sleep(1.0)
+    return True
+
+
 def current_view() -> str:
     """
     Heuristique très grossière basée sur le contenu OCR de l'écran
