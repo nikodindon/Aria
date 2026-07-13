@@ -195,8 +195,11 @@ def reply_to_user(user: dict, last_message: str) -> bool:
         # Cas special : LLM a renvoye une reponse tres courte ou vide
         # (ex: 429 ou timeout). On protege.
         if not response or len(response.strip()) < 3:
-            print(f"[aria_loop] LLM a renvoye reponse vide, fallback")
-            return False
+            print(f"[aria_loop] LLM a renvoye reponse vide, fallback gracieux")
+            # Au lieu de se taire (skip silencieux qui laisse l'user
+            # sans reponse), on envoie un message d'erreur amical.
+            # Mieux qu'un silence.
+            response = "Desole, j'ai un petit souci technique la. Redemande dans 30 secondes ?"
 
     # 2.6 Troncature de la reponse. WhatsApp n'a pas de limite stricte
     # mais un message > 800 chars peut deplacer le bouton Envoyer de
