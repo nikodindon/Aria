@@ -170,18 +170,53 @@ aria/
 - [x] **Troncature des réponses > 700 chars** (évite tap rate sur le bouton Envoyer)
 - [x] **Fallback gracieux** si LLM/Hermes échoue (message d'erreur amical au lieu de silence)
 
-### Phase 9 — Pilotage d'autres apps (en cours) 🟡
-- [ ] `plugins/launch_app.py` : ouvrir YouTube, Maps, etc. sur demande
-- [ ] `plugins/youtube.py` : chercher + lire une vidéo
-- [ ] `plugins/maps.py` : navigation, recherche d'itinéraires
-- [ ] Catalogue d'actions physiques pilotables par ARIA
+### Phase 9 — Pilotage d'autres apps ✅ EN COURS
+- [x] `plugins/app_actions.py` : catalogue d'actions physiques (open_app, open_url, open_youtube_search)
+- [x] Format `[ACTION] name|args` parsé par ARIA et exécuté via ADB
+- [x] System prompt explique à Hermes les actions disponibles
+- [ ] Catalogue étendu : Maps avec itinéraire, Gmail avec recherche, etc.
+- [ ] Actions imbriquées : "ouvre YouTube, cherche 'tutos Python', lis la 1re vidéo"
+- [ ] Catalogue d'actions spécifiques par app (ex: `youtube_play_first_result`)
 
-### Phase 10 — À venir 🔵
-- [ ] Interface web de monitoring (état d'ARIA, logs, humeur)
+### Phase 10 — Recherche sémantique hybride 🔵 À VENIR
+- [ ] Embeddings locaux (sentence-transformers déjà installé)
+- [ ] `core/memory.py` : table `messages_embeddings` (id, vector_blob)
+- [ ] `recall_relevant_hybrid(query)` : combine FTS5 + cosine similarity
+- [ ] Re-rank des résultats FTS5 par proximité sémantique
+- [ ] Remplacement progressif du recall FTS5 par le hybrid
+
+### Phase 11 — Appels téléphoniques 🔵 À VENIR
+- [ ] Détection appels entrants via `dumpsys telephony` ou notif
+- [ ] Décrocher / raccrocher via ADB (`KEYCODE_CALL` / `am start ANSWER_PHONE`)
+- [ ] Capturer audio micro via `screenrecord` ou app tierce
+- [ ] STT streaming (Whisper local ou API)
+- [ ] TTS temps réel (Piper / Coqui) pour répondre
+- [ ] Appels sortants sur demande (`am start CALL tel:...`)
+- [ ] VAD (Voice Activity Detection) pour demi-duplex naturel
+
+### Phase 12 — Multi-devices (swarm) 🔵 À VENIR
+- [ ] `tools/aria_orchestrator.py` : pilote N devices en parallèle
+- [ ] Chaque agent a sa DB locale (préfixe `device_id`)
+- [ ] Communication inter-agents via MQTT local ou groupe WhatsApp dédié
+- [ ] Spécialités par agent : Aria-Caméra, Aria-Son, Aria-GPS, Aria-Sécurité
+- [ ] Cas d'usage : surveillance multi-pièces, monitoring environnemental
+
+### Phase 13 — Web UI monitoring 🔵 À VENIR
+- [ ] FastAPI + HTMX (ou Streamlit) en local
+- [ ] Dashboard : humeur, derniers messages, logs en temps réel
+- [ ] Déclencher des actions manuellement (test rapide sans WhatsApp)
+- [ ] Historique des interactions, stats d'usage
+- [ ] Mode "vie" : voir plusieurs agents sur une carte (multi-devices)
+
+### Phase 14 — À venir 🔵
+- [ ] Notifications multi-users / groupes WhatsApp
+- [ ] Réactions (emojis) + messages vocaux via TTS occasionnels
+- [ ] Style de réponse varié selon l'humeur (déjà partiel)
+- [ ] Sécurité élargie (mots de passe redact en plus des OTP)
 - [ ] Mode "avion" : génère ses actions hors ligne, exécute au retour
-- [ ] Embeddings pour recherche sémantique (sentence-transformers, installé)
 - [ ] Migration `list_conversations` + `open_conversation` vers UI Automator (au lieu d'OCR)
-- [ ] Gmail API / appel téléphonique / STT vocal
+- [ ] Appels téléphoniques (Phase 11)
+- [ ] Swarm multi-devices (Phase 12)
 
 ---
 
