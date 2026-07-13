@@ -1,0 +1,39 @@
+# aria.service — systemd unit file pour ARIA daemon
+#
+# Installation :
+#   1. Copier ce fichier dans /etc/systemd/system/ :
+#      sudo cp tools/aria.service.example /etc/systemd/system/aria.service
+#   2. Editer le chemin du projet (WorkingDirectory=) et de l'user (User=)
+#   3. Recharger systemd :
+#      sudo systemctl daemon-reload
+#   4. Activer le demarrage auto :
+#      sudo systemctl enable aria.service
+#   5. Demarrer maintenant :
+#      sudo systemctl start aria.service
+#   6. Voir les logs :
+#      journalctl -u aria.service -f
+
+[Unit]
+Description=ARIA WhatsApp gateway daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=niko
+WorkingDirectory=/home/niko/Aria
+ExecStart=/home/niko/Aria/venv/bin/python3 /home/niko/Aria/tools/aria_daemon.py --interval 30
+Restart=always
+RestartSec=10
+# Limite de restart : si crash 5 fois en 60s, on arrete (evite boucle infinie)
+StartLimitIntervalSec=60
+StartLimitBurst=5
+# Logs
+StandardOutput=journal
+StandardError=journal
+# Garde le telephone eveille via ADB wakeup (gere dans le code)
+# L'environnement
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

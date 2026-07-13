@@ -221,17 +221,25 @@ ok, out, err = run_python('''
 import sys
 sys.path.insert(0, "/home/niko/Aria")
 import scheduler.tasks.evening_digest as ed
+import scheduler.tasks.proactive_ping as pp
+# Mock send_message sur les 2 modules (sinon evening_digest.send_message
+# peut etre re-importe et perder notre mock)
 calls = []
-def mock_send(text, phone=None, screenshot_path=None):
+def mock_send_ed(text, phone=None, screenshot_path=None):
     calls.append({"text": text, "phone": phone})
     return True
-ed.send_message = mock_send
+def mock_send_pp(text, phone=None, screenshot_path=None):
+    return True
+ed.send_message = mock_send_ed
+pp.send_message = mock_send_pp
+# Reset la liste pour cette verif
+calls.clear()
 ed.run()
-assert len(calls) == 1
+assert len(calls) == 1, f"expected 1, got {len(calls)}"
 assert calls[0]["phone"] == "33617186267"
 print("OK")
 ''')
-check("T12 evening_digest.run() mocked", "OK" in out)
+check("T12 evening_digest.run() mocked (send mocked on 2 modules)", "OK" in out)
 
 # T13. proactive_ping skip
 ok, out, err = run_python('''

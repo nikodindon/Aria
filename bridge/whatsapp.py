@@ -477,19 +477,37 @@ def _send_via_deeplink(phone: str, text: str) -> bool:
     import urllib.parse
     # 1. Reveiller l'ecran. Sur MIUI l'ecran timeout rapidement
     # (~2 min) et le tap dans le vide ne fait rien si l'ecran est
-    # endormi. KEYCODE_WAKEUP (= 224) le reveille. On swipe aussi
-    # pour passer l'eventuel lockscreen (swipe haut = deverrouiller).
+    # endormi. KEYCODE_WAKEUP (= 224) le reveille. KEYCODE_MENU
+    # (= 82) peut aussi aider sur certains ROMs.
     adb._adb("shell", "input", "keyevent", "224", check=True)  # WAKEUP
-    time.sleep(0.3)
-    # Swipe vers le haut pour deverrouiller (si lockscreen actif).
-    # On wrap dans try/except : le swipe peut fail (pas de lockscreen
-    # ou swipe deja fait), on s'en fout, on continue.
+    time.sleep(0.5)
+
+    # 2. Swipe vers le haut pour deverrouiller (si lockscreen actif).
+    # On essaie plusieurs variantes : swipe rapide (200ms), puis si
+    # toujours lockscreen on retente. wrap dans try/except : peut
+    # fail (pas de lockscreen), c'est OK.
+    for _ in range(2):
+        try:
+            adb._adb("shell", "input", "swipe",
+                     "540", "1800", "540", "500", "200", check=True)
+            time.sleep(0.3)
+        except Exception:
+            pass
+
+    # Verifie si on est encore sur le lockscreen. Si oui, on tente
+    # un deuxieme swipe plus agressif (parfois le premier est trop
+    # rapide sur MIUI).
     try:
-        adb._adb("shell", "input", "swipe", "540", "1800", "540", "500", "200",
-                 check=True)
+        wake = adb._adb("shell", "dumpsys", "power", check=True)
+        if "mWakefulness=Asleep" in wake:
+            # Encore endormi, on retente le wakeup
+            adb._adb("shell", "input", "keyevent", "224", check=True)
+            time.sleep(0.3)
+            adb._adb("shell", "input", "swipe",
+                     "540", "1800", "540", "500", "300", check=True)
+            time.sleep(0.3)
     except Exception:
         pass
-    time.sleep(0.5)
 
     # 2. Normalise le num : wa.me attend le format international sans +
     digits = "".join(c for c in phone if c.isdigit())
