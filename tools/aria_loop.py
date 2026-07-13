@@ -170,6 +170,13 @@ def reply_to_user(user: dict, last_message: str) -> bool:
     m = _delegate_re.match(r"\s*\[DELEGATE\]\s*(.+)", response, _delegate_re.DOTALL)
     if m:
         query = m.group(1).strip()
+        # Tronque la query si elle contient du bruit (le LLM ajoute
+        # parfois des commentaires apres la query). On garde que la
+        # 1re ligne ou les 80 premiers chars.
+        if "\n" in query:
+            query = query.split("\n")[0].strip()
+        if len(query) > 150:
+            query = query[:150].strip()
         print(f"[aria_loop] LLM demande delegation: {query!r}")
         from plugins.agent_delegate import ask_helper_agent
         delegated = ask_helper_agent(query)
@@ -178,9 +185,18 @@ def reply_to_user(user: dict, last_message: str) -> bool:
             response = delegated
             print(f"[aria_loop] delegation OK, reponse substituee")
         else:
-            # Hermes a foire, on garde la reponse originale du LLM
-            # (peut-etre qu'il a quand meme repondu un truc utile)
-            print(f"[aria_loop] delegation a foire, garde reponse LLM: {delegated!r}")
+            # Hermes a foire (timeout, erreur, etc). On ne garde PAS
+            # la reponse [DELEGATE] brute sinon elle sera envoyee a
+            # l'user et tapera n'importe ou dans WhatsApp.
+            # On dit plutot qu'on n'a pas trouve.
+            print(f"[aria_loop] delegation a foire: {delegated!r}")
+            response = "J'ai pas trouve d'info fiable, la. Refais ta question ou redemande plus tard ?"
+    else:
+        # Cas special : LLM a renvoye une reponse tres courte ou vide
+        # (ex: 429 ou timeout). On protege.
+        if not response or len(response.strip()) < 3:
+            print(f"[aria_loop] LLM a renvoye reponse vide, fallback")
+            return False
 
     # 3. Envoi via deep link
     try:
