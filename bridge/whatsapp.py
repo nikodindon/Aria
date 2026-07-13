@@ -219,6 +219,14 @@ def current_view() -> str:
     courant. Utile pour sanity-check avant une action (Phase 1.4).
 
     Retourne : "discussions" | "conversation" | "other"
+
+    Heuristique :
+      - "discussions" : on voit la barre de recherche Meta AI
+        ("demander à meta") ET la tab bar (actus/appels/communautes).
+      - "conversation" : on voit le placeholder du champ de saisie
+        ("message" seul, ou "saisir un message"). C'est volontairement
+        large : on accepte plusieurs variantes du placeholder selon
+        les versions de WA.
     """
     png = _screenshot()
     img = Image.open(png)
@@ -226,6 +234,10 @@ def current_view() -> str:
     text = pytesseract.image_to_string(img, lang="fra").lower()
     if "demander à meta" in text or ("discussions" in text and "actus" in text):
         return "discussions"
-    if "saisir un message" in text or "taper un message" in text:
+    # Placeholder champ de saisie. Variantes : "message", "saisir un message",
+    # "taper un message". On cherche "message" en mot isole (suivi d'espace
+    # ou en fin de ligne) pour eviter les faux positifs (sinon "messages
+    # personnels sont chiffres" matche aussi).
+    if re.search(r"\bmessage\b", text) and "personnels" not in text:
         return "conversation"
     return "other"

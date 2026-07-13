@@ -228,6 +228,29 @@ python -m scheduler.runner
 - WhatsApp installé et connecté sur le téléphone
 - Écran qui reste allumé (paramètre développeur)
 
+### ⚠️ INJECT_EVENTS sur MIUI / HyperOS
+
+Les ROMs Xiaomi (MIUI 12+) refusent par défaut à `adb shell input tap/swipe/text/keyevent` d'injecter des events. Symptôme : `SecurityException: Injecting input events requires the caller to have the INJECT_EVENTS permission`.
+
+**Fix** :
+1. Options pour les développeurs → activer "Installer via USB" ET "Débogage USB (Paramètres de sécurité)"
+2. **Redémarrer le téléphone** (l'autorisation n'est effective qu'après reboot, pas juste après le toggle)
+3. Vérifier : `adb shell input tap 540 1200` doit retourner sans erreur
+
+Sur les versions récentes de MIUI 14 / HyperOS, c'est la seule voie sans root. Si le reboot ne suffit pas, alternative : installer une app shizuku qui joue le rôle de proxy d'injection.
+
+### Connexion Wi-Fi (alternative à l'USB)
+
+Pour ne pas dépendre du câble :
+
+```
+adb pair 192.168.1.X:YYYYY     # une seule fois, demande le code affiché sur le téléphone
+adb connect 192.168.1.X:ZZZZZ  # connexions suivantes
+adb devices                    # doit lister 192.168.1.X:PORT
+```
+
+Pour de l'automation long-running, l'USB reste plus fiable (pas de perte de paquets Wi-Fi, pas de sleep du Wi-Fi device).
+
 ---
 
 ## 🔒 Sécurité & éthique
