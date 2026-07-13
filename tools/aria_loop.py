@@ -367,21 +367,41 @@ def _load_recent_texts(window_min: int = DEDUP_WINDOW_MINUTES) -> set[str]:
 
 
 def _record_text_seen(text_norm: str) -> None:
-    """Enregistre un texte normalise comme vu maintenant. Persistant."""
+    """Enregistre un texte normalise comme vu maintenant. Persistant.
+
+    Utilise un lock fichier pour eviter les race conditions quand
+    2 polls tournent en parallele (peu probable avec un seul thread,
+    mais le daemon pourrait etre lance plusieurs fois).
+    """
+    import fcntl
     SEEN_TEXTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    if SEEN_TEXTS_PATH.exists():
-        try:
-            data = json.loads(SEEN_TEXTS_PATH.read_text())
-        except Exception:
+    # Lock fichier pour serialiser les acces concurrents
+    lock_path = SEEN_TEXTS_PATH.with_suffix(".lock")
+    try:
+        lock_fd = open(lock_path, "w")
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+    except Exception:
+        # Si le lock echoue, on continue sans (mieux que rien)
+        lock_fd = None
+
+    try:
+        if SEEN_TEXTS_PATH.exists():
+            try:
+                data = json.loads(SEEN_TEXTS_PATH.read_text())
+            except Exception:
+                data = {}
+        else:
             data = {}
-    else:
-        data = {}
-    # Nettoie les vieux (>DEDUP_WINDOW_MINUTES) avant d'ajouter
-    now = time.time()
-    cutoff = now - DEDUP_WINDOW_MINUTES * 60
-    data = {t: ts for t, ts in data.items() if ts > cutoff}
-    data[text_norm] = now
-    SEEN_TEXTS_PATH.write_text(json.dumps(data))
+        # Nettoie les vieux (>DEDUP_WINDOW_MINUTES) avant d'ajouter
+        now = time.time()
+        cutoff = now - DEDUP_WINDOW_MINUTES * 60
+        data = {t: ts for t, ts in data.items() if ts > cutoff}
+        data[text_norm] = now
+        SEEN_TEXTS_PATH.write_text(json.dumps(data))
+    finally:
+        if lock_fd is not None:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            lock_fd.close()
 
 
 def _remove_text_seen(text_norm: str) -> None:
@@ -390,15 +410,28 @@ def _remove_text_seen(text_norm: str) -> None:
     Sans ca, si l'envoi a plante, l'user ne pourrait pas renvoyer
     un message similaire pendant 10 minutes (fenetre de dedup).
     """
+    import fcntl
     if not SEEN_TEXTS_PATH.exists():
         return
+    lock_path = SEEN_TEXTS_PATH.with_suffix(".lock")
     try:
-        data = json.loads(SEEN_TEXTS_PATH.read_text())
+        lock_fd = open(lock_path, "w")
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
     except Exception:
-        return
-    if text_norm in data:
-        del data[text_norm]
-        SEEN_TEXTS_PATH.write_text(json.dumps(data))
+        lock_fd = None
+
+    try:
+        try:
+            data = json.loads(SEEN_TEXTS_PATH.read_text())
+        except Exception:
+            return
+        if text_norm in data:
+            del data[text_norm]
+            SEEN_TEXTS_PATH.write_text(json.dumps(data))
+    finally:
+        if lock_fd is not None:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            lock_fd.close()
 
 
 def main() -> int:

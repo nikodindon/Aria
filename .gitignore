@@ -9,6 +9,7 @@ __pycache__/
 data/aria.db
 data/logs/
 data/seen_texts.json
+data/seen_texts.lock
 *.db
 *.sqlite
 
