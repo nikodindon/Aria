@@ -113,115 +113,52 @@ def extract_phone_from_title(title: str) -> str | None:
 
 
 def reply_to_user(user: dict, last_message: str) -> bool:
-    """Genere une reponse via LLM et l'envoie a l'user via deep link.
+    """Genere une reponse via Hermes et l'envoie a l'user via deep link.
 
-    Strategie :
-    1. Demande au LLM local de repondre.
-    2. Si la reponse commence par [DELEGATE] <query>, le LLM
-       a decide qu'il ne sait pas -> on delegue a Hermes qui
-       fait la recherche web. On substitue la reponse.
-    3. Envoi via deep link + log en DB + mood update.
+    Strategie (depuis commit acfc762 simplifie) :
+    1. On demande directement a Hermes (via ask_helper_agent) de repondre.
+       Plus de LLM local, plus de rate limit, plus de probleme.
+    2. Si Hermes repond, on tronque a 700 chars max (pour le tap sur
+       Envoyer) et on envoie via deep link.
+    3. Si Hermes foire, on envoie un message d'erreur amical.
 
-    Le LLM est l'expert pour decider QUAND il doit chercher.
-    Plus de mots-cles hardcodes cote Python : c'est le system
-    prompt qui indique au LLM quand utiliser [DELEGATE].
+    On garde le contexte WhatsApp (historique, news, meteo) dans la
+    query envoyee a Hermes pour qu'il ait les memes infos qu'avant.
+
+    Pourquoi ce changement : LiteLLM local est rate-limite tout le
+    temps. Hermes (utilise comme agent helper) est stable et
+    peut faire des recherches web lui-meme. Donc on simplifie
+    en ne passant que par lui.
     """
     sender = user.get("name") or user["phone"]
-    response = None
 
-    # 1. LLM local avec contexte complet + retry
+    # 1. Construit le contexte WhatsApp (pour info, pas pour le LLM)
     try:
-        system, messages = build_whatsapp_context(sender, last_message)
+        system, messages_ctx = build_whatsapp_context(sender, last_message)
     except Exception as e:
         print(f"[aria_loop] build_context failed: {e}")
-        return False
+        system, messages_ctx = "", []
 
-    try:
-        response = chat(
-            messages=messages,
-            system=system,
-            max_tokens=300,
-        )
-    except Exception as e:
-        err_str = str(e)
-        is_rate_limit = "429" in err_str or "Too Many" in err_str or "rate" in err_str.lower()
-        print(f"[aria_loop] LLM failed (1st try): {'rate limit' if is_rate_limit else 'erreur'}")
-        # Retry avec backoff exponentiel.
-        # Si c'est un rate limit (429) : on attend plus longtemps,
-        # pour laisser les cles API LiteLLM se liberer (rotation).
-        # Si c'est une autre erreur : on retry quand meme mais plus court.
-        if is_rate_limit:
-            delays = [10, 20, 40, 60]  # 130s total max, pour rate limit
-        else:
-            delays = [3, 6, 12]  # 21s total max, pour autres erreurs
-        import time as _time
-        for attempt, delay in enumerate(delays, start=2):
-            _time.sleep(delay)
-            try:
-                response = chat(
-                    messages=messages,
-                    system=system,
-                    max_tokens=300,
-                )
-                print(f"[aria_loop] LLM OK au {attempt}e retry")
-                break
-            except Exception as e2:
-                err2_str = str(e2)
-                still_rate = "429" in err2_str or "Too Many" in err2_str
-                print(f"[aria_loop] LLM failed (retry {attempt}): {'rate limit' if still_rate else 'erreur'}")
-        else:
-            print(f"[aria_loop] LLM failed apres {len(delays)+1} tentatives, fallback gracieux")
-            # Au lieu de se taire, on envoie un message d'erreur amical
-            # L'user sait qu'il y a un probleme, il peut retry dans qq min
-            response = "Desole, le LLM rame en ce moment (rate limit). Redemande dans 2-3 minutes ?"
-            # NOTE: si la delegation marche, on l'utilisera aussi
-            from plugins.agent_delegate import ask_helper_agent
-            delegated = ask_helper_agent(f"Reponds a cette question: {last_message}")
-            if delegated and not delegated.startswith("["):
-                response = delegated
+    # 2. Delegation a Hermes avec contexte
+    # On envoie : la question + le system prompt (qui contient l'historique,
+    # les news, la meteo, etc) pour qu'Hermes ait le meme contexte qu'avant.
+    from plugins.agent_delegate import ask_helper_agent
+    query = last_message
+    if system:
+        # On prefixe la query avec le system prompt pour garder le contexte
+        query = f"{system}\n\n---\n\nQuestion de {sender} : {last_message}"
+    print(f"[aria_loop] delegation a Hermes ({len(query)}c)...")
+    response = ask_helper_agent(query, timeout=60)
 
-    # 2. Detection [DELEGATE] dans la reponse du LLM.
-    # Le system prompt demande a ARIA de commencer par [DELEGATE] <query>
-    # si elle pense ne pas avoir l'info. On parse et on delegue.
-    import re as _delegate_re
-    m = _delegate_re.match(r"\s*\[DELEGATE\]\s*(.+)", response, _delegate_re.DOTALL)
-    if m:
-        query = m.group(1).strip()
-        # Tronque la query si elle contient du bruit (le LLM ajoute
-        # parfois des commentaires apres la query). On garde que la
-        # 1re ligne ou les 80 premiers chars.
-        if "\n" in query:
-            query = query.split("\n")[0].strip()
-        if len(query) > 150:
-            query = query[:150].strip()
-        print(f"[aria_loop] LLM demande delegation: {query!r}")
-        from plugins.agent_delegate import ask_helper_agent
-        delegated = ask_helper_agent(query)
-        if delegated is not None and not delegated.startswith("["):
-            # Hermes a repondu, on prend sa reponse
-            response = delegated
-            print(f"[aria_loop] delegation OK, reponse substituee")
-        else:
-            # Hermes a foire (timeout, erreur, etc). On ne garde PAS
-            # la reponse [DELEGATE] brute sinon elle sera envoyee a
-            # l'user et tapera n'importe ou dans WhatsApp.
-            # On dit plutot qu'on n'a pas trouve.
-            print(f"[aria_loop] delegation a foire: {delegated!r}")
-            response = "J'ai pas trouve d'info fiable, la. Refais ta question ou redemande plus tard ?"
-    else:
-        # Cas special : LLM a renvoye une reponse tres courte ou vide
-        # (ex: 429 ou timeout). On protege.
-        if not response or len(response.strip()) < 3:
-            print(f"[aria_loop] LLM a renvoye reponse vide, fallback gracieux")
-            # Au lieu de se taire (skip silencieux qui laisse l'user
-            # sans reponse), on envoie un message d'erreur amical.
-            # Mieux qu'un silence.
-            response = "Desole, j'ai un petit souci technique la. Redemande dans 30 secondes ?"
+    # 3. Gestion du resultat
+    if response is None or response.startswith("["):
+        # Hermes a foire (timeout, erreur, ou reponse bracket)
+        print(f"[aria_loop] Hermes a foire: {response!r}")
+        response = "Desole, j'ai un petit souci technique la. Redemande dans 30 secondes ?"
 
-    # 2.6 Troncature de la reponse. WhatsApp n'a pas de limite stricte
+    # 4. Troncature de la reponse. WhatsApp n'a pas de limite stricte
     # mais un message > 800 chars peut deplacer le bouton Envoyer de
     # la zone detectee par _find_send_button(), causant un tap rate.
-    # On coupe a 700 chars et on finit par "..." si on a coupe.
     if len(response) > 700:
         response = response[:700].rsplit(" ", 1)[0] + "..."
         print(f"[aria_loop] reponse tronquee a 700 chars")
