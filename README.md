@@ -178,6 +178,12 @@ aria/
 - [ ] Actions imbriquées : "ouvre YouTube, cherche 'tutos Python', lis la 1re vidéo"
 - [ ] Catalogue d'actions spécifiques par app (ex: `youtube_play_first_result`)
 
+### Phase 9b — Intentions (au lieu d'actions) 🔵 REFACTOR
+- [ ] Couche d'abstraction : LLM exprime une **intention** (open_video_player, get_route, send_email)
+- [ ] Planificateur Python choisit le plugin (YouTube vs NewPipe, Maps vs Organic Maps)
+- [ ] Permet de switcher d'app sans modifier le prompt du LLM
+- [ ] `plugins/intentions.py` : registre intention → plugins disponibles
+
 ### Phase 10 — Recherche sémantique hybride 🔵 À VENIR
 - [ ] Embeddings locaux (sentence-transformers déjà installé)
 - [ ] `core/memory.py` : table `messages_embeddings` (id, vector_blob)
@@ -194,29 +200,63 @@ aria/
 - [ ] Appels sortants sur demande (`am start CALL tel:...`)
 - [ ] VAD (Voice Activity Detection) pour demi-duplex naturel
 
-### Phase 12 — Multi-devices (swarm) 🔵 À VENIR
+### Phase 12 — Mémoire épisodique + carnet relationnel 🔵 TRANSFORMATEUR
+- [ ] `core/memory.py` : table `episodes` (date, summary, people, topics, mood_at_time)
+- [ ] Consolidation automatique : tous les X messages, on résume la journée
+- [ ] `core/people.py` : table `people` (name, likes, dislikes, notes, last_topic)
+- [ ] Pour chaque user appairé, ARIA construit un carnet relationnel
+- [ ] Récupération de contexte : "tu te souviens quand on a parlé de X ?"
+- [ ] `core/curiosity.py` : centres d'intérêt évolutifs (fréquence de mentions de topics)
+
+### Phase 13 — Humeur riche + cycle circadien 🔵 VIE NUMÉRIQUE
+- [ ] Humeur multi-dim : `curiosity`, `energy`, `irony`, `motivation`, `nostalgia`, `focus`, `dreaminess`
+- [ ] `core/circadian.py` : cycle selon heure/jour/semaine (8h bonne humeur, 2h fatiguée, dimanche bavarde)
+- [ ] Style de réponse influencé par l'humeur (phrases courtes si fatiguée, plus bavard si curieuse)
+- [ ] `core/monologue.py` : journal intime jamais envoyé, juste pour elle
+
+### Phase 14 — Planification + objectifs long-terme 🔵 AGENT AUTONOME
+- [ ] `core/goals.py` : table `goals` (description, status, plan, sub_goals, due_at)
+- [ ] ARIA peut créer un goal : "trouve un nouveau jeu pour Niko" sur 3 jours
+- [ ] Planificateur : goal → sous-objectifs → actions → résultat → réflexion
+- [ ] `scheduler/tasks/goal_runner.py` : vérifie les goals actifs périodiquement
+- [ ] Veille proactive : "j'ai vu passer un truc qui pourrait t'intéresser" via Hacker News + centres d'intérêt
+
+### Phase 15 — Caméra + vision 🔵 VISION
+- [ ] Capture photo/vidéo périodique via ADB (`screencap` + `screenrecord`)
+- [ ] Modèle vision (LLaVA, Moondream) pour comprendre la scène
+- [ ] Mémoire visuelle : ARIA se souvient de ce qu'elle "voit"
+- [ ] Proactivité visuelle : "il fait sombre dans le salon, allume la lumière ?"
+
+### Phase 16 — Multi-devices (swarm) 🔵 ARMÉE
 - [ ] `tools/aria_orchestrator.py` : pilote N devices en parallèle
 - [ ] Chaque agent a sa DB locale (préfixe `device_id`)
 - [ ] Communication inter-agents via MQTT local ou groupe WhatsApp dédié
 - [ ] Spécialités par agent : Aria-Caméra, Aria-Son, Aria-GPS, Aria-Sécurité
 - [ ] Cas d'usage : surveillance multi-pièces, monitoring environnemental
 
-### Phase 13 — Web UI monitoring 🔵 À VENIR
+### Phase 17 — Web UI monitoring 🔵 VISIBILITÉ
 - [ ] FastAPI + HTMX (ou Streamlit) en local
 - [ ] Dashboard : humeur, derniers messages, logs en temps réel
+- [ ] **Observabilité** : métriques (temps réponse, actions, erreurs ADB, redémarrages)
+- [ ] **Journal d'événements** : séparation conversations vs événements système
 - [ ] Déclencher des actions manuellement (test rapide sans WhatsApp)
-- [ ] Historique des interactions, stats d'usage
 - [ ] Mode "vie" : voir plusieurs agents sur une carte (multi-devices)
 
-### Phase 14 — À venir 🔵
+### Phase 18 — Compétences installables + sécurité par niveaux 🔵 OUVERTURE
+- [ ] Système `aria install <plugin>` : ajoute un plugin (prompts, outils, mémoire)
+- [ ] **Niveaux de confiance** : READ_ONLY, BENIGN, SENSITIVE (avec confirmation)
+- [ ] Appels et apps bancaires toujours en SENSITIVE
+- [ ] **File d'attente persistante** : actions rejouables après crash ADB
+- [ ] `plugins/camera.py`, `plugins/spotify.py`, `plugins/calendar.py`, `plugins/homeassistant.py`
+
+### Phase 19 — À venir 🔵
 - [ ] Notifications multi-users / groupes WhatsApp
 - [ ] Réactions (emojis) + messages vocaux via TTS occasionnels
-- [ ] Style de réponse varié selon l'humeur (déjà partiel)
 - [ ] Sécurité élargie (mots de passe redact en plus des OTP)
 - [ ] Mode "avion" : génère ses actions hors ligne, exécute au retour
-- [ ] Migration `list_conversations` + `open_conversation` vers UI Automator (au lieu d'OCR)
-- [ ] Appels téléphoniques (Phase 11)
-- [ ] Swarm multi-devices (Phase 12)
+- [ ] Migration `list_conversations` + `open_conversation` vers UI Automator
+- [ ] ARIA qui "découvre" les interfaces (voir écran → comprendre → cliquer) sans connaître l'app
+- [ ] **Robotique low-cost** : smartphones fixés sur châssis à roues (swarm robotics)
 
 ---
 
