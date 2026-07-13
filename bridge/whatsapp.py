@@ -147,21 +147,83 @@ def read_conversation(screenshot_path: Optional[str] = None) -> list[dict]:
     """
     Lit les messages visibles dans une conversation WhatsApp ouverte.
 
-    Heuristique Phase 1.3 :
-      - Crop la zone messages (y=[280, 2150] sur 1080x2400).
-      - OCR mot par mot avec image_to_data.
-      - Groupement en messages : un nouveau message demarre quand
-        le gap vertical entre deux mots consecutifs depasse 1.5x la
-        hauteur moyenne d'un mot.
-      - Direction : position du bord gauche. < 270 =recu (gauche),
-        > 810 =envoye (droite), sinon unknown.
-      - Timestamp : dernier mot du message, si format HH:MM.
-      - Credentials redactes via redact_credentials().
+    Strategie principale : UI Automator dump (rapide, ~30 KB, texte
+    exact, pas d'OCR). Fallback : screenshot + OCR (lent, ~600 KB,
+    prone aux erreurs OCR) si UI Automator echoue.
 
-    Note : suppose qu'on est DANS une conversation ouverte. Si on
-    est sur la vue Discussions, l'OCR produit du garbage. Le caller
-    doit verifier current_view() == "conversation" en amont.
+    Retourne une liste de {direction, text, y_center} triee par
+    ordre d'apparition (haut vers le bas de l'ecran).
+    direction = "in" (recu) | "out" (envoye) | "unknown"
+
+    Note : WhatsApp n'expose pas l'horodatage par message via UI
+    Automator (seulement la date du jour). Si le timestamp est
+    necessaire, le caller doit utiliser l'API notifications
+    (dumpsys notification) pour le recuperer.
+
+    Note : suppose qu'on est DANS une conversation ouverte. Le
+    caller doit verifier current_view() == "conversation" en amont.
     """
+    try:
+        return _read_via_uiautomator()
+    except Exception as e:
+        # Fallback OCR. Plus lent, plus d'erreurs, mais marche si
+        # UI Automator n'est pas dispo (vieux Android, ROM custom).
+        print(f"[read_conversation] UI Automator a echoue ({e}), fallback OCR")
+        return _read_via_ocr(screenshot_path)
+
+
+def _read_via_uiautomator() -> list[dict]:
+    """Lit les messages via UI Automator dump. Rapide, sans OCR."""
+    import xml.etree.ElementTree as ET
+
+    # uiautomator dump ecrit sur /sdcard, on pull en local puis cleanup
+    adb._adb("shell", "uiautomator", "dump", "/sdcard/aria_msg.xml", check=True)
+
+    # On pull le fichier (different du precedent screenshot path)
+    import tempfile
+    tmp = Path(tempfile.gettempdir()) / "aria_msg.xml"
+    adb._adb("pull", "/sdcard/aria_msg.xml", str(tmp), check=True)
+    adb._adb("shell", "rm", "/sdcard/aria_msg.xml")  # cleanup APRES pull
+
+    tree = ET.parse(str(tmp))
+    root = tree.getroot()
+
+    messages = []
+    for node in root.iter("node"):
+        rid = node.get("resource-id", "")
+        if rid == "com.whatsapp:id/message_text":
+            text = node.get("text", "").strip()
+            if not text:
+                continue
+            bounds_str = node.get("bounds", "")
+            # Format: "[x1,y1][x2,y2]"
+            import re as _re
+            m = _re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds_str)
+            if not m:
+                continue
+            x1, y1, x2, y2 = map(int, m.groups())
+            x_center = (x1 + x2) // 2
+            y_center = (y1 + y2) // 2
+            # Direction : si le CENTRE est a droite du milieu de l'ecran,
+            # c'est envoye (bulle droite). Si a gauche, c'est recu.
+            if x_center > 540:
+                direction = "out"
+            elif x_center < 540:
+                direction = "in"
+            else:
+                direction = "unknown"
+            messages.append({
+                "direction": direction,
+                "text": redact_credentials(text),
+                "time": "",  # UI Automator n'expose pas l'heure
+                "y_center": y_center,
+            })
+
+    return messages
+
+
+def _read_via_ocr(screenshot_path: Optional[str] = None) -> list[dict]:
+    """Fallback OCR (lent). Garde la v1 pour les cas desesperes."""
     png = Path(screenshot_path) if screenshot_path else _screenshot()
     img = Image.open(png)
     w, h = img.size
@@ -198,8 +260,6 @@ def read_conversation(screenshot_path: Optional[str] = None) -> list[dict]:
     gap_threshold = int(avg_h * 1.5)
     words.sort(key=lambda w: (w["top"], w["left"]))
 
-    # Groupement en messages : on coupe quand le gap vertical entre
-    # le mot precedent et le mot courant depasse le seuil.
     messages: list[list[dict]] = []
     current: list[dict] = [words[0]]
     for w in words[1:]:
@@ -216,7 +276,6 @@ def read_conversation(screenshot_path: Optional[str] = None) -> list[dict]:
     for msg_words in messages:
         msg_words_sorted = sorted(msg_words, key=lambda w: (w["top"], w["left"]))
         text = " ".join(w["text"] for w in msg_words_sorted)
-
         min_left = min(w["left"] for w in msg_words_sorted)
         if min_left < 270:
             direction = "in"
@@ -224,18 +283,14 @@ def read_conversation(screenshot_path: Optional[str] = None) -> list[dict]:
             direction = "out"
         else:
             direction = "unknown"
-
         time_str = ""
         if msg_words_sorted:
             last = msg_words_sorted[-1]["text"]
             if re.match(r"^\d{1,2}:\d{2}$", last):
                 time_str = last
-
         y_center = msg_words_sorted[0]["top"] + msg_words_sorted[0]["height"] // 2 + MSG_TOP
-
         if time_str:
             text = text[: -len(time_str)].strip()
-
         result.append({
             "direction": direction,
             "text": redact_credentials(text),
