@@ -150,9 +150,27 @@ def reply_to_user(user: dict, last_message: str) -> bool:
     print(f"[aria_loop] delegation a Hermes ({len(query)}c)...")
     response = ask_helper_agent(query, timeout=60)
 
-    # 3. Gestion du resultat
-    if response is None or response.startswith("["):
-        # Hermes a foire (timeout, erreur, ou reponse bracket)
+    # 3. Detection [ACTION] dans la reponse d'Hermes.
+    # Hermes peut demander une action physique (ouvrir une app,
+    # chercher une video, etc) avec un tag [ACTION] name|args.
+    from plugins.app_actions import parse_action, execute_action
+    action_result = None
+    if response:
+        action = parse_action(response)
+        if action:
+            action_name, action_args = action
+            print(f"[aria_loop] Hermes demande action: {action_name}({action_args!r})")
+            action_result = execute_action(action_name, action_args)
+            print(f"[aria_loop] action result: {action_result}")
+            # On substitue la reponse par le resultat de l'action
+            response = action_result
+        else:
+            # Cas special : Hermes a renvoye une reponse tres courte ou vide
+            if not response or len(response.strip()) < 3:
+                print(f"[aria_loop] Hermes a renvoye reponse vide, fallback gracieux")
+                response = "Desole, j'ai un petit souci technique la. Redemande dans 30 secondes ?"
+    else:
+        # Hermes a foire (timeout, erreur)
         print(f"[aria_loop] Hermes a foire: {response!r}")
         response = "Desole, j'ai un petit souci technique la. Redemande dans 30 secondes ?"
 
