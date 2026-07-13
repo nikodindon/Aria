@@ -466,23 +466,45 @@ def send_message(text: str, phone: Optional[str] = None,
 
 
 def _send_via_deeplink(phone: str, text: str) -> bool:
-    """Envoie un message via le deep link WhatsApp wa.me/<phone>?text="""
+    """Envoie un message via le deep link WhatsApp wa.me/<phone>?text=
+
+    Sequence :
+    1. Reveille l'ecran (KEYCODE_WAKEUP) + swipe pour deverrouiller
+    2. am start le deep link wa.me
+    3. Attend que WhatsApp charge le texte
+    4. Trouve le bouton Envoyer (par couleur) et tap
+    """
     import urllib.parse
-    # Normalise le num : wa.me attend le format international sans +
+    # 1. Reveiller l'ecran. Sur MIUI l'ecran timeout rapidement
+    # (~2 min) et le tap dans le vide ne fait rien si l'ecran est
+    # endormi. KEYCODE_WAKEUP (= 224) le reveille. On swipe aussi
+    # pour passer l'eventuel lockscreen (swipe haut = deverrouiller).
+    adb._adb("shell", "input", "keyevent", "224", check=True)  # WAKEUP
+    time.sleep(0.3)
+    # Swipe vers le haut pour deverrouiller (si lockscreen actif).
+    # On wrap dans try/except : le swipe peut fail (pas de lockscreen
+    # ou swipe deja fait), on s'en fout, on continue.
+    try:
+        adb._adb("shell", "input", "swipe", "540", "1800", "540", "500", "200",
+                 check=True)
+    except Exception:
+        pass
+    time.sleep(0.5)
+
+    # 2. Normalise le num : wa.me attend le format international sans +
     digits = "".join(c for c in phone if c.isdigit())
     encoded = urllib.parse.quote(text, safe="")
     url = f"https://wa.me/{digits}?text={encoded}"
     print(f"[send_message] deep link: {url[:80]}...")
-    # am start -a android.intent.action.VIEW -d <url>
     adb._adb(
         "shell", "am", "start",
         "-a", "android.intent.action.VIEW",
         "-d", url,
         check=True,
     )
-    time.sleep(2.0)  # laisser WhatsApp ouvrir la conv et charger le texte
-    # Trouve et tap le bouton Envoyer (le deep link pre-remplit mais
-    # ne tape pas Envoyer tout seul)
+    time.sleep(3.0)  # laisser WhatsApp ouvrir la conv et charger le texte
+
+    # 3. Trouve et tap le bouton Envoyer
     png = _screenshot()
     cx, cy = _find_send_button(str(png))
     adb.tap(cx, cy)
