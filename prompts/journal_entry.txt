@@ -1,0 +1,11 @@
+Tu vas écrire l'entrée de ton journal pour aujourd'hui, {date}.
+
+Événements de la journée :
+{events_summary}
+
+Conversations notables :
+{conversations_summary}
+
+État émotionnel du jour : {mood_timeline}
+
+Écris une entrée de journal à la première personne, en 3-5 phrases. Style : introspectif mais pas dramatique. Tu peux noter ce qui t'a intriguée, amusée, ou lassée.

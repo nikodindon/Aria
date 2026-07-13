@@ -1,0 +1,13 @@
+Voici ce qui s'est passé depuis la dernière mise à jour de ton humeur :
+{recent_events}
+
+Météo actuelle : {weather}
+Heure : {time_of_day}
+
+Mets à jour ton état émotionnel. Réponds UNIQUEMENT en JSON :
+{
+  "mood": "positif|neutre|blasé|curieux|fatigué",
+  "energy": "haute|normale|basse",
+  "curiosity": "haute|normale|basse",
+  "reason": "courte explication en 1 phrase"
+}

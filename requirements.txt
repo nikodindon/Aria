@@ -1,0 +1,26 @@
+# Core
+python-dotenv>=1.0.0
+pyyaml>=6.0
+requests>=2.31.0
+
+# Scheduler
+APScheduler>=3.10.0
+
+# Base de données
+sqlite-utils>=3.35
+
+# OCR / Vision
+Pillow>=10.0.0
+pytesseract>=0.3.10
+
+# Embeddings (mémoire sémantique)
+sentence-transformers>=2.7.0
+
+# Optionnel : X/Twitter
+tweepy>=4.14.0
+
+# Optionnel : TTS local
+# TTS>=0.22.0  # Coqui TTS — décommenter si besoin
+
+# Dev / debug
+rich>=13.0.0

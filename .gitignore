@@ -1,0 +1,24 @@
+# Environnement
+.env
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Données locales
+data/aria.db
+data/logs/
+*.db
+*.sqlite
+
+# Configs sensibles
+config/platforms.yaml
+
+# Captures ADB temporaires
+*.png
+*.jpg
+tmp/
+
+# IDE
+.vscode/
+.idea/

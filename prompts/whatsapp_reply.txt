@@ -1,0 +1,9 @@
+Tu reçois ce message WhatsApp :
+De : {sender}
+Message : {message}
+
+Historique récent :
+{history}
+
+Réponds de façon naturelle, en accord avec ta personnalité et ton état du moment.
+Sois concise (message WhatsApp, pas un essai).
