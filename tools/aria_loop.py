@@ -264,8 +264,10 @@ def process_pending_notifications(seen_keys: set) -> int:
                 print(f"[aria_loop] notif d'un num non appaire: {phone} ({n['title']!r})")
                 continue
         # Dedup temporel : meme contenu dans les dernieres X min ?
+        # On utilise _is_duplicate (match exact + prefix) pour gerer
+        # le cas ou Android a tronque la notif au milieu.
         text_norm = _normalize_for_dedup(n["text"])
-        if text_norm in recent_texts:
+        if _is_duplicate(text_norm, recent_texts):
             print(f"[aria_loop] doublon recent detecte (meme texte en <{DEDUP_WINDOW_MINUTES}min), skip: {n['text'][:50]!r}")
             continue
         # IMPORTANT : on enregistre le texte vu AVANT de traiter, pour
@@ -326,12 +328,36 @@ def _normalize_for_dedup(text: str) -> str:
     'Comment tu vas ?' et 'comment tu vas' et 'Comment tu vas?' sont
     consideres identiques. On garde les accents (le redact_credentials
     peut etre different entre 2 messages similaires).
+
+    IMPORTANT : on retourne le texte complet, PAS un prefixe. Le
+    match exact est OK parce que le meme message (long ou tronque
+    par Android) sera re-compare via _is_duplicate() qui teste
+    a la fois exact match et prefix match.
     """
     import re as _re
     t = text.lower().strip()
     # Retire ponctuation a la fin
     t = _re.sub(r"[\?\.\!\s]+$", "", t)
     return t
+
+
+def _is_duplicate(text_norm: str, recent_texts: set[str]) -> bool:
+    """Vrai si text_norm est un doublon d'un texte recent.
+
+    On teste :
+    1. Match exact : meme texte complet
+    2. Match par prefixe (40 chars) : gere le cas ou Android
+       tronque une notif longue au milieu (provoque 2 textes
+       differents qui sont en fait la meme notif)
+    """
+    if text_norm in recent_texts:
+        return True
+    # Match par prefixe de 40 chars
+    prefix = text_norm[:40]
+    for recent in recent_texts:
+        if recent[:40] == prefix:
+            return True
+    return False
 
 
 def _load_recent_texts(window_min: int = DEDUP_WINDOW_MINUTES) -> set[str]:
