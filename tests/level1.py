@@ -234,12 +234,15 @@ ed.send_message = mock_send_ed
 pp.send_message = mock_send_pp
 # Reset la liste pour cette verif
 calls.clear()
+# Force un mock sur LLM aussi (pour eviter timeout si le LLM rame)
+import core.brain as brain_mod
+brain_mod.chat = lambda *a, **k: "Journal de test simule pour la verification."
 ed.run()
 assert len(calls) == 1, f"expected 1, got {len(calls)}"
 assert calls[0]["phone"] == "33617186267"
 print("OK")
 ''')
-check("T12 evening_digest.run() mocked (send mocked on 2 modules)", "OK" in out)
+check("T12 evening_digest.run() mocked (LLM + send mocked on 2 modules)", "OK" in out)
 
 # T13. proactive_ping skip
 ok, out, err = run_python('''
